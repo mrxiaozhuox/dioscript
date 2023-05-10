@@ -9,4 +9,6 @@ pub enum Value {
     List(Vec<Value>),
     Dict(HashMap<String, Value>),
     Tuple((Box<Value>, Box<Value>)),
+    Element(crate::element::Element),
+    Reference(String),
 }

@@ -3,23 +3,27 @@ use std::collections::HashMap;
 use nom::{
     branch::alt,
     bytes::complete::{escaped, tag, tag_no_case, take_till1, take_while1, take_while_m_n},
-    character::complete::{alphanumeric1, multispace0, space0},
+    character::complete::{alphanumeric1, multispace0, space0, space1},
     combinator::{map, opt, peek, value},
     error::context,
-    multi::separated_list0,
+    multi::{fold_many1, many0, separated_list0, separated_list1},
     number::complete::double,
-    sequence::{delimited, pair, preceded, separated_pair, terminated},
+    sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
 
-use crate::types::Value;
+use crate::{
+    ast::{
+        ConditionalExpr, ConditionalSignal, ConditionalStatement, DioAstStatement, DioscriptAst,
+    },
+    types::Value,
+};
 
-#[allow(dead_code)]
 enum AttributeType {
     Attribute((String, Value)),
     Content(String),
     Element(crate::element::Element),
-    Comment,
+    Reference(String),
 }
 
 struct TypeParser;
@@ -40,13 +44,13 @@ impl TypeParser {
                 tag("n"),
                 tag("r"),
                 tag("t"),
-                ElementParser::parse_hex,
+                TypeParser::parse_hex,
             )),
         )(i)
     }
 
     fn string_format(message: &str) -> IResult<&str, &str> {
-        escaped(ElementParser::normal, '\\', ElementParser::escapable)(message)
+        escaped(TypeParser::normal, '\\', TypeParser::escapable)(message)
     }
 
     fn parse_hex(message: &str) -> IResult<&str, &str> {
@@ -64,7 +68,7 @@ impl TypeParser {
             "string",
             alt((
                 tag("\"\""),
-                delimited(tag("\""), ElementParser::string_format, tag("\"")),
+                delimited(tag("\""), TypeParser::string_format, tag("\"")),
             )),
         )(message)
     }
@@ -90,6 +94,15 @@ impl TypeParser {
                 ),
                 tag("]"),
             ),
+        )(message)
+    }
+
+    fn reference(message: &str) -> IResult<&str, String> {
+        context(
+            "reference",
+            map(pair(tag("@"), VarParser::parse_var_name), |v| {
+                v.1.to_string()
+            }),
         )(message)
     }
 
@@ -140,70 +153,100 @@ impl TypeParser {
     pub fn parse(message: &str) -> IResult<&str, Value> {
         context(
             "value",
-            delimited(
-                multispace0,
-                alt((
-                    map(TypeParser::number, Value::Number),
-                    map(TypeParser::boolean, Value::Boolean),
-                    map(TypeParser::string, |s| Value::String(String::from(s))),
-                    map(TypeParser::list, Value::List),
-                    map(TypeParser::dict, Value::Dict),
-                    map(TypeParser::tuple, Value::Tuple),
-                )),
-                multispace0,
-            ),
+            alt((
+                map(TypeParser::number, Value::Number),
+                map(TypeParser::boolean, Value::Boolean),
+                map(TypeParser::string, |s| Value::String(String::from(s))),
+                map(TypeParser::list, Value::List),
+                map(TypeParser::dict, Value::Dict),
+                map(TypeParser::tuple, Value::Tuple),
+                map(TypeParser::reference, Value::Reference),
+                map(ElementParser::parse, Value::Element),
+            )),
         )(&message)
     }
 }
 
-#[allow(dead_code)]
-struct ElementParser;
-impl ElementParser {
-    fn normal(message: &str) -> IResult<&str, &str> {
-        take_till1(|c: char| c == '\\' || c == '"' || c.is_ascii_control())(message)
+struct VarParser;
+impl VarParser {
+    fn var_name_style(c: char) -> bool {
+        matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
     }
 
-    fn escapable(i: &str) -> IResult<&str, &str> {
+    fn parse_var_name(message: &str) -> IResult<&str, &str> {
+        context("var name", take_while1(Self::var_name_style))(message)
+    }
+
+    fn parse(message: &str) -> IResult<&str, (String, Value)> {
         context(
-            "escaped",
-            alt((
-                tag("\""),
-                tag("\\"),
-                tag("/"),
-                tag("b"),
-                tag("f"),
-                tag("n"),
-                tag("r"),
-                tag("t"),
-                ElementParser::parse_hex,
-            )),
-        )(i)
-    }
-
-    fn string_format(message: &str) -> IResult<&str, &str> {
-        escaped(ElementParser::normal, '\\', ElementParser::escapable)(message)
-    }
-
-    fn parse_hex(message: &str) -> IResult<&str, &str> {
-        context(
-            "hex string",
-            preceded(
-                peek(tag("u")),
-                take_while_m_n(5, 5, |c: char| c.is_ascii_hexdigit() || c == 'u'),
+            "variable",
+            map(
+                tuple((
+                    delimited(
+                        tag("@"),
+                        Self::parse_var_name,
+                        delimited(space0, tag("="), space0),
+                    ),
+                    TypeParser::parse,
+                    tag(";"),
+                )),
+                |v| (v.0.to_string(), v.1),
             ),
         )(message)
     }
+}
 
-    fn parse_string(message: &str) -> IResult<&str, &str> {
+struct StatementParser;
+impl StatementParser {
+    fn conditional(message: &str) -> IResult<&str, Vec<(ConditionalSignal, (bool, Value))>> {
         context(
-            "string",
+            "conditional",
             alt((
-                tag("\"\""),
-                delimited(tag("\""), ElementParser::string_format, tag("\"")),
+                map(pair(opt(tag("!")), TypeParser::parse), |v| {
+                    vec![(ConditionalSignal::None, (v.0.is_some(), v.1.clone()))]
+                }),
+                    fold_many1(
+                        pair(
+                            opt(alt((
+                                delimited(multispace0, tag("=="), multispace0),
+                                delimited(multispace0, tag("!="), multispace0),
+                                delimited(multispace0, tag(">"), multispace0),
+                            ))),
+                            pair(opt(tag("!")), TypeParser::parse),
+                        ),
+                        Vec::new,
+                        |mut arr: Vec<_>, (sign, (not, value)): (Option<&str>, (Option<&str>, Value))| {
+                            println!("{:?}", value);
+                            arr.push((
+                                ConditionalSignal::from_string(sign.unwrap_or("").to_string()),
+                                (not.is_some(), value.clone())
+                            ));
+                            arr
+                        },
+                    ),
             )),
         )(message)
     }
+    fn parse_if(message: &str) -> IResult<&str, ConditionalStatement> {
+        context(
+            "if statment",
+            map(
+                tuple((
+                    pair(tag("if"), space1),
+                    terminated(Self::conditional, pair(space1, tag("{"))),
+                    delimited(multispace0, parse_rsx, pair(multispace0, tag("}"))),
+                )),
+                |(_, cond, inner)| ConditionalStatement {
+                    condition: ConditionalExpr(cond),
+                    inner,
+                },
+            ),
+        )(message)
+    }
+}
 
+struct ElementParser;
+impl ElementParser {
     fn parse_element_name(message: &str) -> IResult<&str, &str> {
         context("element name", alphanumeric1)(message)
     }
@@ -216,7 +259,7 @@ impl ElementParser {
         context("element name", take_while1(Self::attr_name_style))(message)
     }
 
-    fn parse_element(message: &str) -> IResult<&str, crate::element::Element> {
+    fn parse(message: &str) -> IResult<&str, crate::element::Element> {
         context(
             "element",
             map(
@@ -240,20 +283,20 @@ impl ElementParser {
                                     |v| AttributeType::Attribute((v.0.to_string(), v.1)),
                                 ),
                                 map(
-                                    delimited(
-                                        multispace0,
-                                        ElementParser::parse_element,
-                                        multispace0,
-                                    ),
+                                    delimited(multispace0, ElementParser::parse, multispace0),
                                     |v| AttributeType::Element(v),
+                                ),
+                                map(
+                                    delimited(multispace0, TypeParser::string, multispace0),
+                                    |v| AttributeType::Content(v.to_string()),
                                 ),
                                 map(
                                     delimited(
                                         multispace0,
-                                        ElementParser::parse_string,
+                                        pair(tag("@"), VarParser::parse_var_name),
                                         multispace0,
                                     ),
-                                    |v| AttributeType::Content(v.to_string()),
+                                    |v| AttributeType::Reference(v.1.to_string()),
                                 ),
                             )),
                         ),
@@ -275,7 +318,7 @@ impl ElementParser {
                             AttributeType::Element(e) => {
                                 children.push(e);
                             }
-                            AttributeType::Comment => {}
+                            AttributeType::Reference(_s) => {}
                         }
                     }
                     let el = crate::element::Element {
@@ -291,8 +334,30 @@ impl ElementParser {
     }
 }
 
+pub fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
+    context(
+        "AST Full",
+        many0(delimited(
+            multispace0,
+            alt((
+                map(VarParser::parse, |v| {
+                    DioAstStatement::ReferenceAss((v.0.to_string(), v.1.clone()))
+                }),
+                map(
+                    delimited(tag("return "), TypeParser::parse, tag(";")),
+                    |v| DioAstStatement::ReturnValue(v),
+                ),
+                map(StatementParser::parse_if, |v| {
+                    DioAstStatement::IfStatement(v)
+                }),
+            )),
+            multispace0,
+        )),
+    )(message)
+}
+
 #[test]
 fn hello() {
-    let v = ElementParser::parse_element(include_str!("../test.rsx"));
+    let v = parse_rsx(include_str!("../test.rsx"));
     println!("{:#?}", v.unwrap().1);
 }
