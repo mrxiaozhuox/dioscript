@@ -7,7 +7,7 @@
 
 @data = ["u1", "u2", "u3"];
 
-if "@dark" {
+if !@dark {
 	return "dark theme unsupport.";
 }
 
