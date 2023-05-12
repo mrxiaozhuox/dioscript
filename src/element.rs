@@ -6,6 +6,13 @@ use crate::types::Value;
 pub struct Element {
     pub name: String,
     pub attributes: HashMap<String, Value>,
-    pub content: String,
-    pub children: Vec<Element>,
+    pub content: Vec<ElementContentType>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ElementContentType {
+    Children(Element),
+    Content(String),
+    Condition(crate::ast::ConditionalStatement),
+    Reference(String),
 }

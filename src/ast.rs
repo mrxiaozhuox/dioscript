@@ -18,10 +18,11 @@ pub enum DioAstStatement {
 pub struct ConditionalStatement {
     pub condition: ConditionalExpr,
     pub inner: Vec<DioAstStatement>,
+    pub otherwise: Option<Vec<DioAstStatement>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConditionalExpr(pub Vec<(ConditionalSignal, (bool, Value))>);
+pub struct ConditionalExpr(pub Vec<(ConditionalSignal, SubExpr)>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubExpr {

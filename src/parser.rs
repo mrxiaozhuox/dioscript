@@ -15,7 +15,9 @@ use nom::{
 use crate::{
     ast::{
         ConditionalExpr, ConditionalSignal, ConditionalStatement, DioAstStatement, DioscriptAst,
+        SubExpr,
     },
+    element::ElementContentType,
     types::Value,
 };
 
@@ -24,6 +26,7 @@ enum AttributeType {
     Content(String),
     Element(crate::element::Element),
     Reference(String),
+    Condition(ConditionalStatement),
 }
 
 struct TypeParser;
@@ -198,33 +201,46 @@ impl VarParser {
 
 struct StatementParser;
 impl StatementParser {
-    fn conditional(message: &str) -> IResult<&str, Vec<(ConditionalSignal, (bool, Value))>> {
+    fn conditional(message: &str) -> IResult<&str, Vec<(ConditionalSignal, SubExpr)>> {
         context(
             "conditional",
-            alt((
-                map(pair(opt(tag("!")), TypeParser::parse), |v| {
-                    vec![(ConditionalSignal::None, (v.0.is_some(), v.1.clone()))]
-                }),
-                    fold_many1(
-                        pair(
-                            opt(alt((
-                                delimited(multispace0, tag("=="), multispace0),
-                                delimited(multispace0, tag("!="), multispace0),
-                                delimited(multispace0, tag(">"), multispace0),
-                            ))),
-                            pair(opt(tag("!")), TypeParser::parse),
+            fold_many1(
+                pair(
+                    opt(alt((
+                        delimited(multispace0, tag("=="), multispace0),
+                        delimited(multispace0, tag("!="), multispace0),
+                        delimited(multispace0, tag(">"), multispace0),
+                        delimited(multispace0, tag("<"), multispace0),
+                        delimited(multispace0, tag(">="), multispace0),
+                        delimited(multispace0, tag("<="), multispace0),
+                        delimited(multispace0, tag("&&"), multispace0),
+                        delimited(multispace0, tag("||"), multispace0),
+                    ))),
+                    alt((
+                        map(
+                            pair(opt(tag("!")), terminated(TypeParser::parse, space0)),
+                            |v| SubExpr::Single((v.0.is_some(), v.1.clone())),
                         ),
-                        Vec::new,
-                        |mut arr: Vec<_>, (sign, (not, value)): (Option<&str>, (Option<&str>, Value))| {
-                            println!("{:?}", value);
-                            arr.push((
-                                ConditionalSignal::from_string(sign.unwrap_or("").to_string()),
-                                (not.is_some(), value.clone())
-                            ));
-                            arr
-                        },
-                    ),
-            )),
+                        map(
+                            delimited(
+                                pair(tag("("), space0),
+                                Self::conditional,
+                                pair(space0, tag(")")),
+                            ),
+                            |v| SubExpr::Pair(ConditionalExpr(v)),
+                        ),
+                    )),
+                ),
+                Vec::new,
+                |mut arr: Vec<_>, (sign, value)| {
+                    println!("{:?}", value);
+                    arr.push((
+                        ConditionalSignal::from_string(sign.unwrap_or("").to_string()),
+                        value,
+                    ));
+                    arr
+                },
+            ),
         )(message)
     }
     fn parse_if(message: &str) -> IResult<&str, ConditionalStatement> {
@@ -233,12 +249,22 @@ impl StatementParser {
             map(
                 tuple((
                     pair(tag("if"), space1),
-                    terminated(Self::conditional, pair(space1, tag("{"))),
+                    terminated(Self::conditional, pair(space0, tag("{"))),
                     delimited(multispace0, parse_rsx, pair(multispace0, tag("}"))),
+                    opt(delimited(
+                        delimited(
+                            space0,
+                            tag("else"),
+                            delimited(space0, tag("{"), multispace0),
+                        ),
+                        parse_rsx,
+                        pair(multispace0, tag("}")),
+                    )),
                 )),
-                |(_, cond, inner)| ConditionalStatement {
+                |(_, cond, inner, otherwise)| ConditionalStatement {
                     condition: ConditionalExpr(cond),
                     inner,
+                    otherwise,
                 },
             ),
         )(message)
@@ -298,6 +324,10 @@ impl ElementParser {
                                     ),
                                     |v| AttributeType::Reference(v.1.to_string()),
                                 ),
+                                map(
+                                    delimited(multispace0, StatementParser::parse_if, multispace0),
+                                    |v| AttributeType::Condition(v),
+                                ),
                             )),
                         ),
                         delimited(opt(tag(",")), multispace0, tag("}")),
@@ -305,27 +335,30 @@ impl ElementParser {
                 ),
                 |(name, attrs)| {
                     let mut attr: HashMap<String, Value> = HashMap::new();
-                    let mut content: String = String::new();
-                    let mut children: Vec<crate::element::Element> = vec![];
+                    let mut content = vec![];
                     for a in attrs {
                         match a {
                             AttributeType::Attribute((key, value)) => {
                                 attr.insert(key, value);
                             }
                             AttributeType::Content(c) => {
-                                content = c;
+                                content.push(ElementContentType::Content(c));
                             }
                             AttributeType::Element(e) => {
-                                children.push(e);
+                                content.push(ElementContentType::Children(e));
                             }
-                            AttributeType::Reference(_s) => {}
+                            AttributeType::Reference(s) => {
+                                content.push(ElementContentType::Reference(s));
+                            }
+                            AttributeType::Condition(c) => {
+                                content.push(ElementContentType::Condition(c));
+                            }
                         }
                     }
                     let el = crate::element::Element {
                         name: name.to_string(),
                         attributes: attr,
                         content,
-                        children,
                     };
                     el
                 },

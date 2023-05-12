@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 dioxus = { version = "0.3.2" }
 nom = { version = "7" }
+
+thiserror = "1.0.40"

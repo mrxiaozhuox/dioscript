@@ -3,13 +3,16 @@
 
 @root_class = "bg-gray-800";
 
-@sub_components = div { "Hello world" };
-
 @data = ["u1", "u2", "u3"];
 
-if !@dark {
+if @name == "hello world" || (true == true) {
 	return "dark theme unsupport.";
+} else {
+	return "SB";
 }
+
+@enable_sub_componet = true;
+@sub_component = div { "Hello world" };
 
 return div {
 	class: @root_class,
@@ -21,6 +24,8 @@ return div {
 			src: "avatar.jpg"
 		},
 		span { "YuKun Liu" },
-		@sub_components,
+		if @enable_sub_conponent { 
+			return @sub_components;
+		},
 	}
 };
