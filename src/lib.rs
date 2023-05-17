@@ -7,4 +7,4 @@ pub mod types;
 
 pub mod error;
 
-mod ast;
+pub mod ast;

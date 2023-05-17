@@ -13,13 +13,9 @@ pub enum RuntimeError {
         operator: String,
         value_type: String,
     },
-}
+    #[error("reference `{name}` not found.")]
+    ReferenceNotFound { name: String },
 
-impl RuntimeError {
-    pub fn illegal_operator_for_type(operator: &str, value_type: &str) -> Self {
-        Self::IllegalOperatorForType {
-            operator: operator.to_string(),
-            value_type: value_type.to_string(),
-        }
-    }
+    #[error("scope tree have some problem.")]
+    ScopeTreeProblem(#[from] id_tree::NodeIdError),
 }
