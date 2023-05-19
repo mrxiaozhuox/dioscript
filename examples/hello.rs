@@ -1,7 +1,14 @@
 use dioscript;
 fn main() {
-    let ast = dioscript::ast::DioscriptAst::to_ast(include_str!("../test.rsx"));
-    let mut runtime = dioscript::runtime::Runtime::new();
-    let result = runtime.execute_ast(ast);
-    println!("{:#?}", result);
+    let ast = dioscript::ast::DioscriptAst::from_string(include_str!("../test.rsx"));
+    match ast {
+        Ok(ast) => {
+            let mut runtime = dioscript::runtime::Runtime::new();
+            let result = runtime.execute_ast(ast);
+            println!("{:#?}", result);
+        }
+        Err(err) => {
+            panic!("{}", err.to_string());
+        }
+    }
 }

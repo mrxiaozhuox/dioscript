@@ -26,7 +26,7 @@ enum AttributeType {
     Condition(ConditionalStatement),
 }
 
-pub type CalcExpr = Vec<(CalculateMark, SubExpr)>;
+pub(crate) type CalcExpr = Vec<(CalculateMark, SubExpr)>;
 
 struct TypeParser;
 impl TypeParser {
@@ -365,7 +365,7 @@ impl ElementParser {
     }
 }
 
-pub fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
+pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
     context(
         "AST Full",
         many0(delimited(

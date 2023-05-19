@@ -1,9 +1,18 @@
+use nom::error::ErrorKind;
 use thiserror::Error as Terr;
 
 #[derive(Terr, Debug)]
 pub enum Error {
     #[error("runtime execute failed.")]
     Runtime(#[from] RuntimeError),
+    #[error("parse code failed.")]
+    Parse(#[from] ParseError),
+}
+
+#[derive(Terr, Debug)]
+pub enum ParseError {
+    #[error("parse failure - [{kind:?}]: {text}")]
+    ParseFailure { kind: ErrorKind, text: String },
 }
 
 #[derive(Terr, Debug)]
