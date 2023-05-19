@@ -1,6 +1,7 @@
-use std::str::FromStr;
-
-use crate::{parser::parse_rsx, types::Value};
+use crate::{
+    parser::{parse_rsx, CalcExpr},
+    types::Value,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DioscriptAst {
@@ -16,8 +17,8 @@ impl DioscriptAst {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DioAstStatement {
-    ReferenceAss((String, Value)),
-    ReturnValue(Value),
+    ReferenceAss((String, CalcExpr)),
+    ReturnValue(CalcExpr),
     IfStatement(ConditionalStatement),
 }
 
@@ -29,7 +30,7 @@ pub struct ConditionalStatement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConditionalExpr(pub Vec<(ConditionalMark, SubExpr)>);
+pub struct ConditionalExpr(pub Vec<(CalculateMark, SubExpr)>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubExpr {
@@ -40,20 +41,40 @@ pub enum SubExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CalculateMark {
     None,
+
     Plus,
     Minus,
     Multiply,
     Divide,
+
+    Equal,
+    NotEqual,
+    Large,
+    Small,
+    LargeOrEqual,
+    SmallOrEqual,
+    And,
+    Or,
 }
 
 impl ToString for CalculateMark {
     fn to_string(&self) -> String {
         match self {
             CalculateMark::None => "none".to_string(),
+
             CalculateMark::Plus => "+".to_string(),
             CalculateMark::Minus => "-".to_string(),
             CalculateMark::Multiply => "*".to_string(),
             CalculateMark::Divide => "/".to_string(),
+
+            CalculateMark::Equal => "==".to_string(),
+            CalculateMark::NotEqual => "!=".to_string(),
+            CalculateMark::Large => ">".to_string(),
+            CalculateMark::Small => "<".to_string(),
+            CalculateMark::LargeOrEqual => ">=".to_string(),
+            CalculateMark::SmallOrEqual => "<=".to_string(),
+            CalculateMark::And => "&&".to_string(),
+            CalculateMark::Or => "||".to_string(),
         }
     }
 }
@@ -65,43 +86,7 @@ impl CalculateMark {
             "-" => Self::Minus,
             "*" => Self::Multiply,
             "/" => Self::Divide,
-            _ => Self::None,
-        }
-    }
-}
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ConditionalMark {
-    None,
-    Equal,
-    NotEqual,
-    Large,
-    Small,
-    LargeOrEqual,
-    SmallOrEqual,
-    And,
-    Or,
-}
-
-impl ToString for ConditionalMark {
-    fn to_string(&self) -> String {
-        match self {
-            ConditionalMark::None => "none".to_string(),
-            ConditionalMark::Equal => "==".to_string(),
-            ConditionalMark::NotEqual => "!=".to_string(),
-            ConditionalMark::Large => ">".to_string(),
-            ConditionalMark::Small => "<".to_string(),
-            ConditionalMark::LargeOrEqual => ">=".to_string(),
-            ConditionalMark::SmallOrEqual => "<=".to_string(),
-            ConditionalMark::And => "&&".to_string(),
-            ConditionalMark::Or => "||".to_string(),
-        }
-    }
-}
-
-impl ConditionalMark {
-    pub fn from_string(s: String) -> Self {
-        match s.as_str() {
             "==" => Self::Equal,
             "!=" => Self::NotEqual,
             ">" => Self::Large,
@@ -110,6 +95,7 @@ impl ConditionalMark {
             "<=" => Self::SmallOrEqual,
             "&&" => Self::And,
             "||" => Self::Or,
+
             _ => Self::None,
         }
     }

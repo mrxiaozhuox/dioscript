@@ -13,7 +13,7 @@ use nom::{
 };
 
 use crate::{
-    ast::{ConditionalExpr, ConditionalMark, ConditionalStatement, DioAstStatement, SubExpr},
+    ast::{CalculateMark, ConditionalExpr, ConditionalStatement, DioAstStatement, SubExpr},
     element::ElementContentType,
     types::Value,
 };
@@ -25,6 +25,8 @@ enum AttributeType {
     Reference(String),
     Condition(ConditionalStatement),
 }
+
+pub type CalcExpr = Vec<(CalculateMark, SubExpr)>;
 
 struct TypeParser;
 impl TypeParser {
@@ -177,7 +179,7 @@ impl ReferenceParser {
         context("var name", take_while1(Self::var_name_style))(message)
     }
 
-    fn parse(message: &str) -> IResult<&str, (String, Value)> {
+    fn parse(message: &str) -> IResult<&str, (String, CalcExpr)> {
         context(
             "variable",
             map(
@@ -187,7 +189,7 @@ impl ReferenceParser {
                         Self::parse_var_name,
                         delimited(space0, tag("="), space0),
                     ),
-                    TypeParser::parse,
+                    StatementParser::expr,
                     tag(";"),
                 )),
                 |v| (v.0.to_string(), v.1),
@@ -196,22 +198,18 @@ impl ReferenceParser {
     }
 }
 
-struct CalculateParser;
-impl CalculateParser {
-    pub fn calculate(message: &str) -> IResult<&str, Vec> {
-        // context("calc", fold_many1(pair(), Vec::new, |mut arr| arr))
-        todo!()
-    }
-}
-
 struct StatementParser;
 impl StatementParser {
-    fn conditional(message: &str) -> IResult<&str, Vec<(ConditionalMark, SubExpr)>> {
+    pub fn expr(message: &str) -> IResult<&str, CalcExpr> {
         context(
             "conditional",
             fold_many1(
                 pair(
                     opt(alt((
+                        delimited(multispace0, tag("+"), multispace0),
+                        delimited(multispace0, tag("-"), multispace0),
+                        delimited(multispace0, tag("*"), multispace0),
+                        delimited(multispace0, tag("/"), multispace0),
                         delimited(multispace0, tag("=="), multispace0),
                         delimited(multispace0, tag("!="), multispace0),
                         delimited(multispace0, tag(">"), multispace0),
@@ -227,11 +225,7 @@ impl StatementParser {
                             |v| SubExpr::Single((v.0.is_some(), v.1.clone())),
                         ),
                         map(
-                            delimited(
-                                pair(tag("("), space0),
-                                Self::conditional,
-                                pair(space0, tag(")")),
-                            ),
+                            delimited(pair(tag("("), space0), Self::expr, pair(space0, tag(")"))),
                             |v| SubExpr::Pair(ConditionalExpr(v)),
                         ),
                     )),
@@ -239,7 +233,7 @@ impl StatementParser {
                 Vec::new,
                 |mut arr: Vec<_>, (sign, value)| {
                     arr.push((
-                        ConditionalMark::from_string(sign.unwrap_or("").to_string()),
+                        CalculateMark::from_string(sign.unwrap_or("").to_string()),
                         value,
                     ));
                     arr
@@ -253,7 +247,7 @@ impl StatementParser {
             map(
                 tuple((
                     pair(tag("if"), space1),
-                    terminated(Self::conditional, pair(space0, tag("{"))),
+                    terminated(Self::expr, pair(space0, tag("{"))),
                     delimited(multispace0, parse_rsx, pair(multispace0, tag("}"))),
                     opt(delimited(
                         delimited(
@@ -381,7 +375,7 @@ pub fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
                     DioAstStatement::ReferenceAss((v.0.to_string(), v.1.clone()))
                 }),
                 map(
-                    delimited(tag("return "), TypeParser::parse, tag(";")),
+                    delimited(tag("return "), StatementParser::expr, tag(";")),
                     |v| DioAstStatement::ReturnValue(v),
                 ),
                 map(StatementParser::parse_if, |v| {

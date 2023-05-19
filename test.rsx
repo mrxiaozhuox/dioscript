@@ -1,3 +1,7 @@
+@num = (1 + 1 - 1 + (10 * 2));
+return @num;
+
+
 @name = "hello rsx";
 @dark = false;
 
@@ -5,7 +9,7 @@
 
 @data = ["u1", "u2", "u3"];
 
-if !@dark {
+if @dark {
 	return "dark theme unsupport.";
 }
 

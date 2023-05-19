@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use crate::{ast::ConditionalMark, error::RuntimeError};
+use crate::{
+    ast::{CalculateMark, SubExpr},
+    error::RuntimeError,
+    parser::CalcExpr,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -103,7 +107,7 @@ impl Value {
         }
     }
 
-    pub fn compare(&self, o: &Value, s: ConditionalMark) -> Result<bool, RuntimeError> {
+    pub fn calc(&self, o: &Value, s: CalculateMark) -> Result<Value, RuntimeError> {
         if self.value_name() != o.value_name() {
             return Err(RuntimeError::CompareDiffType {
                 a: self.value_name(),
@@ -112,71 +116,101 @@ impl Value {
         }
 
         return match s {
-            ConditionalMark::Equal => match self {
-                Value::String(v) => Ok(v.to_string() == o.as_string().unwrap()),
-                Value::Number(v) => Ok(*v == o.as_number().unwrap()),
-                Value::Boolean(v) => Ok(*v == o.as_boolean().unwrap()),
-                Value::List(v) => Ok(v.clone() == o.as_list().unwrap()),
-                Value::Dict(v) => Ok(v.clone() == o.as_dict().unwrap()),
-                Value::Tuple(v) => Ok(v.clone() == o.as_tuple().unwrap()),
-                Value::Element(v) => Ok(v.clone() == o.as_element().unwrap()),
-                Value::Reference(v) => Ok(v.to_string() == o.as_string().unwrap()),
+            CalculateMark::Plus => match self {
+                Value::String(v) => Ok(Self::String(format!("{}{}", v, o.as_string().unwrap()))),
+                Value::Number(v) => Ok(Self::Number(v + o.as_number().unwrap())),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "+".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            CalculateMark::Minus => match self {
+                Value::Number(v) => Ok(Self::Number(v - o.as_number().unwrap())),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "+".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            CalculateMark::Multiply => match self {
+                Value::Number(v) => Ok(Self::Number(v * o.as_number().unwrap())),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "+".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            CalculateMark::Divide => match self {
+                Value::Number(v) => Ok(Self::Number(v / o.as_number().unwrap())),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "+".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+
+            CalculateMark::Equal => match self {
+                Value::String(v) => Ok(Value::Boolean(v.to_string() == o.as_string().unwrap())),
+                Value::Number(v) => Ok(Value::Boolean(*v == o.as_number().unwrap())),
+                Value::Boolean(v) => Ok(Value::Boolean(*v == o.as_boolean().unwrap())),
+                Value::List(v) => Ok(Value::Boolean(v.clone() == o.as_list().unwrap())),
+                Value::Dict(v) => Ok(Value::Boolean(v.clone() == o.as_dict().unwrap())),
+                Value::Tuple(v) => Ok(Value::Boolean(v.clone() == o.as_tuple().unwrap())),
+                Value::Element(v) => Ok(Value::Boolean(v.clone() == o.as_element().unwrap())),
+                Value::Reference(v) => Ok(Value::Boolean(v.to_string() == o.as_string().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "==".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalMark::NotEqual => match self {
-                Value::String(v) => Ok(v.to_string() != o.as_string().unwrap()),
-                Value::Number(v) => Ok(*v != o.as_number().unwrap()),
-                Value::Boolean(v) => Ok(*v != o.as_boolean().unwrap()),
-                Value::List(v) => Ok(v.clone() != o.as_list().unwrap()),
-                Value::Dict(v) => Ok(v.clone() != o.as_dict().unwrap()),
-                Value::Tuple(v) => Ok(v.clone() != o.as_tuple().unwrap()),
-                Value::Element(v) => Ok(v.clone() != o.as_element().unwrap()),
-                Value::Reference(v) => Ok(v.to_string() != o.as_string().unwrap()),
+            CalculateMark::NotEqual => match self {
+                Value::String(v) => Ok(Value::Boolean(v.to_string() != o.as_string().unwrap())),
+                Value::Number(v) => Ok(Value::Boolean(*v != o.as_number().unwrap())),
+                Value::Boolean(v) => Ok(Value::Boolean(*v != o.as_boolean().unwrap())),
+                Value::List(v) => Ok(Value::Boolean(v.clone() != o.as_list().unwrap())),
+                Value::Dict(v) => Ok(Value::Boolean(v.clone() != o.as_dict().unwrap())),
+                Value::Tuple(v) => Ok(Value::Boolean(v.clone() != o.as_tuple().unwrap())),
+                Value::Element(v) => Ok(Value::Boolean(v.clone() != o.as_element().unwrap())),
+                Value::Reference(v) => Ok(Value::Boolean(v.to_string() != o.as_string().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "!=".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalMark::Large => match self {
-                Value::Number(v) => Ok(*v > o.as_number().unwrap()),
+            CalculateMark::Large => match self {
+                Value::Number(v) => Ok(Value::Boolean(*v > o.as_number().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: ">".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalMark::Small => match self {
-                Value::Number(v) => Ok(*v < o.as_number().unwrap()),
+            CalculateMark::Small => match self {
+                Value::Number(v) => Ok(Value::Boolean(*v < o.as_number().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "<".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalMark::LargeOrEqual => match self {
-                Value::Number(v) => Ok(*v >= o.as_number().unwrap()),
+            CalculateMark::LargeOrEqual => match self {
+                Value::Number(v) => Ok(Value::Boolean(*v >= o.as_number().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: ">=".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalMark::SmallOrEqual => match self {
-                Value::Number(v) => Ok(*v <= o.as_number().unwrap()),
+            CalculateMark::SmallOrEqual => match self {
+                Value::Number(v) => Ok(Value::Boolean(*v <= o.as_number().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "<=".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalMark::And => match self {
-                Value::Boolean(v) => Ok(*v && o.as_boolean().unwrap()),
+            CalculateMark::And => match self {
+                Value::Boolean(v) => Ok(Value::Boolean(*v && o.as_boolean().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "&&".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalMark::Or => match self {
-                Value::Boolean(v) => Ok(*v || o.as_boolean().unwrap()),
+            CalculateMark::Or => match self {
+                Value::Boolean(v) => Ok(Value::Boolean(*v || o.as_boolean().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "||".to_string(),
                     value_type: self.value_name(),
@@ -187,5 +221,9 @@ impl Value {
                 value_type: o.value_name(),
             }),
         };
+    }
+
+    pub fn to_calc_expr(&self) -> CalcExpr {
+        vec![(CalculateMark::None, SubExpr::Single((false, self.clone())))]
     }
 }

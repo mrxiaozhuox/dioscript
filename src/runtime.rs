@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use crate::{
-    ast::{ConditionalMark, DioAstStatement, DioscriptAst, SubExpr},
+    ast::{CalculateMark, DioAstStatement, DioscriptAst, SubExpr},
     error::RuntimeError,
+    parser::CalcExpr,
     types::Value,
 };
 
@@ -37,21 +38,20 @@ impl Runtime {
         statements: Vec<DioAstStatement>,
         current_scope: &NodeId,
     ) -> Result<Value, RuntimeError> {
-        let mut result = Value::None;
-        let mut return_state = false;
+        let mut result: Option<CalcExpr> = None;
         for v in statements {
-            if return_state {
+            if result.is_some() {
                 break;
             }
             match v {
                 crate::ast::DioAstStatement::ReferenceAss(var) => {
                     let name = var.0.clone();
                     let value = var.1.clone();
+                    let value = self.execute_calculate(value, current_scope)?;
                     let _scope = self.set_ref(&name, value, current_scope)?;
                 }
                 crate::ast::DioAstStatement::ReturnValue(r) => {
-                    result = r.clone();
-                    return_state = true;
+                    result = Some(r.clone());
                 }
                 crate::ast::DioAstStatement::IfStatement(cond) => {
                     let sub_scope = self.scope.insert(
@@ -62,31 +62,38 @@ impl Runtime {
                     let condition_expr = cond.condition.0.clone();
                     let inner_ast = cond.inner.clone();
                     let otherwise = cond.otherwise.clone();
-                    let state = self.verify_condition(condition_expr, current_scope)?;
-                    if state {
-                        result = self.execute_scope(inner_ast, &sub_scope)?;
-                        if !result.as_none() {
-                            return_state = true;
-                        }
-                    } else {
-                        if let Some(otherwise) = otherwise {
-                            result = self.execute_scope(otherwise, &sub_scope)?;
-                            if !result.as_none() {
-                                return_state = true;
+                    let state = self.execute_calculate(condition_expr, current_scope)?;
+                    if let Value::Boolean(state) = state {
+                        if state {
+                            let temp = self.execute_scope(inner_ast, &sub_scope)?;
+                            result = Some(temp.to_calc_expr());
+                        } else {
+                            if let Some(otherwise) = otherwise {
+                                let temp = self.execute_scope(otherwise, &sub_scope)?;
+                                result = Some(temp.to_calc_expr());
                             }
                         }
+                    } else {
+                        return Err(RuntimeError::IllegalTypeInConditional {
+                            value_type: state.value_name(),
+                        });
                     }
                 }
             }
         }
-        Ok(result)
+        if let Some(result) = result {
+            let result = self.execute_calculate(result, current_scope)?;
+            Ok(result)
+        } else {
+            Ok(Value::None)
+        }
     }
 
-    fn verify_condition(
+    fn execute_calculate(
         &self,
-        expr: Vec<(ConditionalMark, SubExpr)>,
+        expr: Vec<(CalculateMark, SubExpr)>,
         current_scope: &NodeId,
-    ) -> Result<bool, RuntimeError> {
+    ) -> Result<Value, RuntimeError> {
         let mut buf_value = Value::None;
         for pair in expr {
             let signal = pair.0;
@@ -94,7 +101,6 @@ impl Runtime {
             let content = match info {
                 SubExpr::Single(info) => {
                     let mut content = info.1;
-                    // handle ! signal
 
                     if let Value::Reference(r) = &content {
                         let (_, data) = self.get_ref(r, current_scope)?;
@@ -114,30 +120,20 @@ impl Runtime {
                     content
                 }
                 SubExpr::Pair(p) => {
-                    let v = self.verify_condition(p.0, current_scope)?;
-                    Value::Boolean(v)
+                    let v = self.execute_calculate(p.0, current_scope)?;
+                    v
                 }
             };
 
             if signal.to_string() != "none".to_string() {
-                let matched_value = buf_value.compare(&content, signal)?;
-                buf_value = Value::Boolean(matched_value);
+                let matched_value = buf_value.calc(&content, signal)?;
+                buf_value = matched_value;
             } else {
                 buf_value = content;
             }
         }
 
-        if let Value::Boolean(v) = buf_value {
-            return Ok(v);
-        }
-
-        if let Value::Number(v) = buf_value {
-            if v > 0.0 {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
+        Ok(buf_value)
     }
 
     fn get_ref(

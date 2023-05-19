@@ -22,4 +22,7 @@ pub enum RuntimeError {
 
     #[error("scope node id have some problem.")]
     ScopeNodeIdProblem(#[from] id_tree::NodeIdError),
+
+    #[error("cannot use `{value_type}` in conditional statement.")]
+    IllegalTypeInConditional { value_type: String },
 }
