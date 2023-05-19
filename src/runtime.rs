@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use crate::{
-    ast::{ConditionalSignal, DioAstStatement, DioscriptAst, SubExpr},
+    ast::{ConditionalMark, DioAstStatement, DioscriptAst, SubExpr},
     error::RuntimeError,
     types::Value,
 };
@@ -84,7 +84,7 @@ impl Runtime {
 
     fn verify_condition(
         &self,
-        expr: Vec<(ConditionalSignal, SubExpr)>,
+        expr: Vec<(ConditionalMark, SubExpr)>,
         current_scope: &NodeId,
     ) -> Result<bool, RuntimeError> {
         let mut buf_value = Value::None;

@@ -29,7 +29,7 @@ pub struct ConditionalStatement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConditionalExpr(pub Vec<(ConditionalSignal, SubExpr)>);
+pub struct ConditionalExpr(pub Vec<(ConditionalMark, SubExpr)>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubExpr {
@@ -38,7 +38,40 @@ pub enum SubExpr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ConditionalSignal {
+pub enum CalculateMark {
+    None,
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+}
+
+impl ToString for CalculateMark {
+    fn to_string(&self) -> String {
+        match self {
+            CalculateMark::None => "none".to_string(),
+            CalculateMark::Plus => "+".to_string(),
+            CalculateMark::Minus => "-".to_string(),
+            CalculateMark::Multiply => "*".to_string(),
+            CalculateMark::Divide => "/".to_string(),
+        }
+    }
+}
+
+impl CalculateMark {
+    pub fn from_string(s: String) -> Self {
+        match s.as_str() {
+            "+" => Self::Plus,
+            "-" => Self::Minus,
+            "*" => Self::Multiply,
+            "/" => Self::Divide,
+            _ => Self::None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConditionalMark {
     None,
     Equal,
     NotEqual,
@@ -50,23 +83,23 @@ pub enum ConditionalSignal {
     Or,
 }
 
-impl ToString for ConditionalSignal {
+impl ToString for ConditionalMark {
     fn to_string(&self) -> String {
         match self {
-            ConditionalSignal::None => "none".to_string(),
-            ConditionalSignal::Equal => "==".to_string(),
-            ConditionalSignal::NotEqual => "!=".to_string(),
-            ConditionalSignal::Large => ">".to_string(),
-            ConditionalSignal::Small => "<".to_string(),
-            ConditionalSignal::LargeOrEqual => ">=".to_string(),
-            ConditionalSignal::SmallOrEqual => "<=".to_string(),
-            ConditionalSignal::And => "&&".to_string(),
-            ConditionalSignal::Or => "||".to_string(),
+            ConditionalMark::None => "none".to_string(),
+            ConditionalMark::Equal => "==".to_string(),
+            ConditionalMark::NotEqual => "!=".to_string(),
+            ConditionalMark::Large => ">".to_string(),
+            ConditionalMark::Small => "<".to_string(),
+            ConditionalMark::LargeOrEqual => ">=".to_string(),
+            ConditionalMark::SmallOrEqual => "<=".to_string(),
+            ConditionalMark::And => "&&".to_string(),
+            ConditionalMark::Or => "||".to_string(),
         }
     }
 }
 
-impl ConditionalSignal {
+impl ConditionalMark {
     pub fn from_string(s: String) -> Self {
         match s.as_str() {
             "==" => Self::Equal,

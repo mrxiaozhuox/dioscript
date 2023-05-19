@@ -13,7 +13,7 @@ use nom::{
 };
 
 use crate::{
-    ast::{ConditionalExpr, ConditionalSignal, ConditionalStatement, DioAstStatement, SubExpr},
+    ast::{ConditionalExpr, ConditionalMark, ConditionalStatement, DioAstStatement, SubExpr},
     element::ElementContentType,
     types::Value,
 };
@@ -196,9 +196,17 @@ impl ReferenceParser {
     }
 }
 
+struct CalculateParser;
+impl CalculateParser {
+    pub fn calculate(message: &str) -> IResult<&str, Vec> {
+        // context("calc", fold_many1(pair(), Vec::new, |mut arr| arr))
+        todo!()
+    }
+}
+
 struct StatementParser;
 impl StatementParser {
-    fn conditional(message: &str) -> IResult<&str, Vec<(ConditionalSignal, SubExpr)>> {
+    fn conditional(message: &str) -> IResult<&str, Vec<(ConditionalMark, SubExpr)>> {
         context(
             "conditional",
             fold_many1(
@@ -231,7 +239,7 @@ impl StatementParser {
                 Vec::new,
                 |mut arr: Vec<_>, (sign, value)| {
                     arr.push((
-                        ConditionalSignal::from_string(sign.unwrap_or("").to_string()),
+                        ConditionalMark::from_string(sign.unwrap_or("").to_string()),
                         value,
                     ));
                     arr

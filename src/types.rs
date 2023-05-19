@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{ast::ConditionalSignal, error::RuntimeError};
+use crate::{ast::ConditionalMark, error::RuntimeError};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -103,7 +103,7 @@ impl Value {
         }
     }
 
-    pub fn compare(&self, o: &Value, s: ConditionalSignal) -> Result<bool, RuntimeError> {
+    pub fn compare(&self, o: &Value, s: ConditionalMark) -> Result<bool, RuntimeError> {
         if self.value_name() != o.value_name() {
             return Err(RuntimeError::CompareDiffType {
                 a: self.value_name(),
@@ -112,7 +112,7 @@ impl Value {
         }
 
         return match s {
-            ConditionalSignal::Equal => match self {
+            ConditionalMark::Equal => match self {
                 Value::String(v) => Ok(v.to_string() == o.as_string().unwrap()),
                 Value::Number(v) => Ok(*v == o.as_number().unwrap()),
                 Value::Boolean(v) => Ok(*v == o.as_boolean().unwrap()),
@@ -126,7 +126,7 @@ impl Value {
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalSignal::NotEqual => match self {
+            ConditionalMark::NotEqual => match self {
                 Value::String(v) => Ok(v.to_string() != o.as_string().unwrap()),
                 Value::Number(v) => Ok(*v != o.as_number().unwrap()),
                 Value::Boolean(v) => Ok(*v != o.as_boolean().unwrap()),
@@ -140,42 +140,42 @@ impl Value {
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalSignal::Large => match self {
+            ConditionalMark::Large => match self {
                 Value::Number(v) => Ok(*v > o.as_number().unwrap()),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: ">".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalSignal::Small => match self {
+            ConditionalMark::Small => match self {
                 Value::Number(v) => Ok(*v < o.as_number().unwrap()),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "<".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalSignal::LargeOrEqual => match self {
+            ConditionalMark::LargeOrEqual => match self {
                 Value::Number(v) => Ok(*v >= o.as_number().unwrap()),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: ">=".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalSignal::SmallOrEqual => match self {
+            ConditionalMark::SmallOrEqual => match self {
                 Value::Number(v) => Ok(*v <= o.as_number().unwrap()),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "<=".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalSignal::And => match self {
+            ConditionalMark::And => match self {
                 Value::Boolean(v) => Ok(*v && o.as_boolean().unwrap()),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "&&".to_string(),
                     value_type: self.value_name(),
                 }),
             },
-            ConditionalSignal::Or => match self {
+            ConditionalMark::Or => match self {
                 Value::Boolean(v) => Ok(*v || o.as_boolean().unwrap()),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "||".to_string(),
