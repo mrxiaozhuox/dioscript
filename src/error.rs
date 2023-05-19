@@ -13,6 +13,10 @@ pub enum RuntimeError {
         operator: String,
         value_type: String,
     },
+
+    #[error("cannot compare different data type: `{a}` and `{b}`.")]
+    CompareDiffType { a: String, b: String },
+
     #[error("reference `{name}` not found.")]
     ReferenceNotFound { name: String },
 

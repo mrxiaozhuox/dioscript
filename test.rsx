@@ -5,7 +5,7 @@
 
 @data = ["u1", "u2", "u3"];
 
-if @name == "hello world" || (true == true) {
+if @dark == true {
 	return "dark theme unsupport.";
 } else {
 	return "SB";

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use crate::{ast::ConditionalSignal, error::RuntimeError};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     None,
@@ -99,5 +101,91 @@ impl Value {
         } else {
             None
         }
+    }
+
+    pub fn compare(&self, o: &Value, s: ConditionalSignal) -> Result<bool, RuntimeError> {
+        if self.value_name() != o.value_name() {
+            return Err(RuntimeError::CompareDiffType {
+                a: self.value_name(),
+                b: o.value_name(),
+            });
+        }
+
+        return match s {
+            ConditionalSignal::Equal => match self {
+                Value::String(v) => Ok(v.to_string() == o.as_string().unwrap()),
+                Value::Number(v) => Ok(*v == o.as_number().unwrap()),
+                Value::Boolean(v) => Ok(*v == o.as_boolean().unwrap()),
+                Value::List(v) => Ok(v.clone() == o.as_list().unwrap()),
+                Value::Dict(v) => Ok(v.clone() == o.as_dict().unwrap()),
+                Value::Tuple(v) => Ok(v.clone() == o.as_tuple().unwrap()),
+                Value::Element(v) => Ok(v.clone() == o.as_element().unwrap()),
+                Value::Reference(v) => Ok(v.to_string() == o.as_string().unwrap()),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "==".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            ConditionalSignal::NotEqual => match self {
+                Value::String(v) => Ok(v.to_string() != o.as_string().unwrap()),
+                Value::Number(v) => Ok(*v != o.as_number().unwrap()),
+                Value::Boolean(v) => Ok(*v != o.as_boolean().unwrap()),
+                Value::List(v) => Ok(v.clone() != o.as_list().unwrap()),
+                Value::Dict(v) => Ok(v.clone() != o.as_dict().unwrap()),
+                Value::Tuple(v) => Ok(v.clone() != o.as_tuple().unwrap()),
+                Value::Element(v) => Ok(v.clone() != o.as_element().unwrap()),
+                Value::Reference(v) => Ok(v.to_string() != o.as_string().unwrap()),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "!=".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            ConditionalSignal::Large => match self {
+                Value::Number(v) => Ok(*v > o.as_number().unwrap()),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: ">".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            ConditionalSignal::Small => match self {
+                Value::Number(v) => Ok(*v < o.as_number().unwrap()),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "<".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            ConditionalSignal::LargeOrEqual => match self {
+                Value::Number(v) => Ok(*v >= o.as_number().unwrap()),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: ">=".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            ConditionalSignal::SmallOrEqual => match self {
+                Value::Number(v) => Ok(*v <= o.as_number().unwrap()),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "<=".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            ConditionalSignal::And => match self {
+                Value::Boolean(v) => Ok(*v && o.as_boolean().unwrap()),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "&&".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            ConditionalSignal::Or => match self {
+                Value::Boolean(v) => Ok(*v || o.as_boolean().unwrap()),
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "||".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            _ => Err(RuntimeError::IllegalOperatorForType {
+                operator: "None".to_string(),
+                value_type: o.value_name(),
+            }),
+        };
     }
 }

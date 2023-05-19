@@ -1,10 +1,17 @@
 use std::str::FromStr;
 
-use crate::types::Value;
+use crate::{parser::parse_rsx, types::Value};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DioscriptAst {
     pub stats: Vec<DioAstStatement>,
+}
+
+impl DioscriptAst {
+    pub fn to_ast(message: &str) -> Self {
+        let v = parse_rsx(message).ok().unwrap().1;
+        Self { stats: v }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

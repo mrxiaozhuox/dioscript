@@ -22,8 +22,19 @@ impl Runtime {
         }
     }
 
-    pub fn execute_ast(ast: DioscriptAst) -> Result<Value, RuntimeError> {
-        Ok(Value::None)
+    pub fn execute_ast(&mut self, ast: DioscriptAst) -> Result<Value, RuntimeError> {
+        let id = self
+            .scope
+            .insert(
+                Node::new(Reference {
+                    value: Value::Boolean(true),
+                    counter: 0,
+                }),
+                id_tree::InsertBehavior::AsRoot,
+            )
+            .expect("Scope init failed.");
+        let result = self.execute_scope(ast.stats, &id)?;
+        Ok(result)
     }
 
     pub fn execute_scope(
@@ -32,7 +43,11 @@ impl Runtime {
         current_scope: &NodeId,
     ) -> Result<Value, RuntimeError> {
         let mut result = Value::None;
+        let mut return_state = false;
         for v in statements {
+            if return_state {
+                break;
+            }
             match v {
                 crate::ast::DioAstStatement::ReferenceAss(var) => {
                     let name = var.0.clone();
@@ -41,11 +56,22 @@ impl Runtime {
                 }
                 crate::ast::DioAstStatement::ReturnValue(r) => {
                     result = r.clone();
+                    return_state = true;
                 }
                 crate::ast::DioAstStatement::IfStatement(cond) => {
                     let condition_expr = cond.condition.0.clone();
                     let inner_ast = cond.inner.clone();
                     let otherwise = cond.otherwise.clone();
+                    let state = self.verify_condition(condition_expr, current_scope)?;
+                    if state {
+                        result = self.execute_scope(inner_ast, current_scope)?;
+                        return_state = true;
+                    } else {
+                        if let Some(otherwise) = otherwise {
+                            result = self.execute_scope(otherwise, current_scope)?;
+                            return_state = true;
+                        }
+                    }
                 }
             }
         }
@@ -57,7 +83,6 @@ impl Runtime {
         expr: Vec<(ConditionalSignal, SubExpr)>,
         current_scope: &NodeId,
     ) -> Result<bool, RuntimeError> {
-        let mut current_state = false;
         let mut buf_value = Value::None;
         for pair in expr {
             let signal = pair.0;
@@ -90,18 +115,17 @@ impl Runtime {
                 }
             };
 
-            let matched_value = match signal {
-                ConditionalSignal::None => content,
-                ConditionalSignal::Equal => Value::Boolean(buf_value == content),
-                ConditionalSignal::NotEqual => Value::Boolean(buf_value != content),
-                ConditionalSignal::Large => Value::Boolean(buf_value > content),
-                ConditionalSignal::Small => Value::Boolean(buf_value < content),
-                ConditionalSignal::LargeOrEqual => Value::Boolean(buf_value >= content),
-                ConditionalSignal::SmallOrEqual => Value::Boolean(buf_value <= content),
-                ConditionalSignal::And => Value::Boolean(buf_value && content),
-                ConditionalSignal::Or => Value::Boolean(buf_value || content),
-            };
+            println!("{:?}", signal);
+            if signal.to_string() != "".to_string() {
+                let matched_value = buf_value.compare(&content, signal)?;
+                buf_value = Value::Boolean(matched_value);
+            }
         }
+
+        if let Value::Boolean(v) = buf_value {
+            return Ok(v);
+        }
+
         Ok(false)
     }
 

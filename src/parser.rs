@@ -233,7 +233,6 @@ impl StatementParser {
                 ),
                 Vec::new,
                 |mut arr: Vec<_>, (sign, value)| {
-                    println!("{:?}", value);
                     arr.push((
                         ConditionalSignal::from_string(sign.unwrap_or("").to_string()),
                         value,
