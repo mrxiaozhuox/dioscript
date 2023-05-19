@@ -119,6 +119,8 @@ impl Runtime {
             if signal.to_string() != "".to_string() {
                 let matched_value = buf_value.compare(&content, signal)?;
                 buf_value = Value::Boolean(matched_value);
+            } else {
+                buf_value = content;
             }
         }
 
