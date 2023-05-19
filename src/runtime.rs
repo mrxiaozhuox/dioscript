@@ -9,9 +9,10 @@ use crate::{
 };
 
 pub struct Runtime {
-    // reference content
+    // reference content: use for save reference node-id.
     refs: HashMap<String, NodeId>,
-    scope: Tree<Reference>,
+    // scope tree: use for build scope structure.
+    scope: Tree<ScopeType>,
 }
 
 impl Runtime {
@@ -23,17 +24,11 @@ impl Runtime {
     }
 
     pub fn execute_ast(&mut self, ast: DioscriptAst) -> Result<Value, RuntimeError> {
-        let id = self
+        let root = self
             .scope
-            .insert(
-                Node::new(Reference {
-                    value: Value::Boolean(true),
-                    counter: 0,
-                }),
-                id_tree::InsertBehavior::AsRoot,
-            )
+            .insert(Node::new(ScopeType::Block), id_tree::InsertBehavior::AsRoot)
             .expect("Scope init failed.");
-        let result = self.execute_scope(ast.stats, &id)?;
+        let result = self.execute_scope(ast.stats, &root)?;
         Ok(result)
     }
 
@@ -59,17 +54,26 @@ impl Runtime {
                     return_state = true;
                 }
                 crate::ast::DioAstStatement::IfStatement(cond) => {
+                    let sub_scope = self.scope.insert(
+                        Node::new(ScopeType::Block),
+                        id_tree::InsertBehavior::UnderNode(current_scope),
+                    )?;
+
                     let condition_expr = cond.condition.0.clone();
                     let inner_ast = cond.inner.clone();
                     let otherwise = cond.otherwise.clone();
                     let state = self.verify_condition(condition_expr, current_scope)?;
                     if state {
-                        result = self.execute_scope(inner_ast, current_scope)?;
-                        return_state = true;
+                        result = self.execute_scope(inner_ast, &sub_scope)?;
+                        if !result.as_none() {
+                            return_state = true;
+                        }
                     } else {
                         if let Some(otherwise) = otherwise {
-                            result = self.execute_scope(otherwise, current_scope)?;
-                            return_state = true;
+                            result = self.execute_scope(otherwise, &sub_scope)?;
+                            if !result.as_none() {
+                                return_state = true;
+                            }
                         }
                     }
                 }
@@ -115,8 +119,7 @@ impl Runtime {
                 }
             };
 
-            println!("{:?}", signal);
-            if signal.to_string() != "".to_string() {
+            if signal.to_string() != "none".to_string() {
                 let matched_value = buf_value.compare(&content, signal)?;
                 buf_value = Value::Boolean(matched_value);
             } else {
@@ -126,6 +129,12 @@ impl Runtime {
 
         if let Value::Boolean(v) = buf_value {
             return Ok(v);
+        }
+
+        if let Value::Number(v) = buf_value {
+            if v > 0.0 {
+                return Ok(true);
+            }
         }
 
         Ok(false)
@@ -151,7 +160,7 @@ impl Runtime {
                 }
 
                 if flag {
-                    return Ok((scope.clone(), node.data().clone()));
+                    return Ok((scope.clone(), node.data().clone().as_reference().unwrap()));
                 } else {
                     return Err(RuntimeError::ReferenceNotFound {
                         name: name.to_string(),
@@ -175,18 +184,39 @@ impl Runtime {
         current_scope: &NodeId,
     ) -> Result<NodeId, RuntimeError> {
         if let Some(scope) = self.refs.get(name) {
-            let mut refs = self.scope.get_mut(scope)?.data_mut();
+            let mut refs = self
+                .scope
+                .get_mut(scope)?
+                .data_mut()
+                .as_reference()
+                .unwrap();
+            // change reference value
             refs.value = value;
             refs.counter += 1;
             return Ok(scope.clone());
         } else {
             let new_scope = self.scope.insert(
-                Node::new(Reference { value, counter: 1 }),
+                Node::new(ScopeType::Reference(Reference { value, counter: 1 })),
                 id_tree::InsertBehavior::UnderNode(current_scope),
             )?;
             self.refs.insert(name.to_string(), new_scope.clone());
             return Ok(new_scope);
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ScopeType {
+    Block,
+    Reference(Reference),
+}
+
+impl ScopeType {
+    pub fn as_reference(&self) -> Option<Reference> {
+        if let Self::Reference(r) = self {
+            return Some(r.clone());
+        }
+        None
     }
 }
 

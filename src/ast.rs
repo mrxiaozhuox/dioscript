@@ -53,7 +53,7 @@ pub enum ConditionalSignal {
 impl ToString for ConditionalSignal {
     fn to_string(&self) -> String {
         match self {
-            ConditionalSignal::None => "".to_string(),
+            ConditionalSignal::None => "none".to_string(),
             ConditionalSignal::Equal => "==".to_string(),
             ConditionalSignal::NotEqual => "!=".to_string(),
             ConditionalSignal::Large => ">".to_string(),

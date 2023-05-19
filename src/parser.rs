@@ -6,17 +6,14 @@ use nom::{
     character::complete::{alphanumeric1, multispace0, space0, space1},
     combinator::{map, opt, peek, value},
     error::context,
-    multi::{fold_many1, many0, separated_list0, separated_list1},
+    multi::{fold_many1, many0, separated_list0},
     number::complete::double,
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
 
 use crate::{
-    ast::{
-        ConditionalExpr, ConditionalSignal, ConditionalStatement, DioAstStatement, DioscriptAst,
-        SubExpr,
-    },
+    ast::{ConditionalExpr, ConditionalSignal, ConditionalStatement, DioAstStatement, SubExpr},
     element::ElementContentType,
     types::Value,
 };
@@ -103,7 +100,7 @@ impl TypeParser {
     fn reference(message: &str) -> IResult<&str, String> {
         context(
             "reference",
-            map(pair(tag("@"), VarParser::parse_var_name), |v| {
+            map(pair(tag("@"), ReferenceParser::parse_var_name), |v| {
                 v.1.to_string()
             }),
         )(message)
@@ -170,8 +167,8 @@ impl TypeParser {
     }
 }
 
-struct VarParser;
-impl VarParser {
+struct ReferenceParser;
+impl ReferenceParser {
     fn var_name_style(c: char) -> bool {
         matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
     }
@@ -318,7 +315,7 @@ impl ElementParser {
                                 map(
                                     delimited(
                                         multispace0,
-                                        pair(tag("@"), VarParser::parse_var_name),
+                                        pair(tag("@"), ReferenceParser::parse_var_name),
                                         multispace0,
                                     ),
                                     |v| AttributeType::Reference(v.1.to_string()),
@@ -372,7 +369,7 @@ pub fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
         many0(delimited(
             multispace0,
             alt((
-                map(VarParser::parse, |v| {
+                map(ReferenceParser::parse, |v| {
                     DioAstStatement::ReferenceAss((v.0.to_string(), v.1.clone()))
                 }),
                 map(

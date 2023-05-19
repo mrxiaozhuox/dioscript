@@ -20,6 +20,6 @@ pub enum RuntimeError {
     #[error("reference `{name}` not found.")]
     ReferenceNotFound { name: String },
 
-    #[error("scope tree have some problem.")]
-    ScopeTreeProblem(#[from] id_tree::NodeIdError),
+    #[error("scope node id have some problem.")]
+    ScopeNodeIdProblem(#[from] id_tree::NodeIdError),
 }

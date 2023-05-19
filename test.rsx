@@ -5,11 +5,10 @@
 
 @data = ["u1", "u2", "u3"];
 
-if @dark == true {
+if !@dark {
 	return "dark theme unsupport.";
-} else {
-	return "SB";
 }
+
 
 @enable_sub_componet = true;
 @sub_component = div { "Hello world" };
