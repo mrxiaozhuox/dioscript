@@ -1,7 +1,3 @@
-@num = (1 + 1 - 1 + (10 * 2));
-return @num;
-
-
 @name = "hello rsx";
 @dark = false;
 

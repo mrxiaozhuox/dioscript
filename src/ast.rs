@@ -1,7 +1,7 @@
 use nom::Finish;
 
 use crate::{
-    error::{Error, ParseError},
+    error::ParseError,
     parser::{parse_rsx, CalcExpr},
     types::Value,
 };
@@ -14,8 +14,15 @@ pub struct DioscriptAst {
 impl DioscriptAst {
     pub fn from_string(message: &str) -> Result<Self, ParseError> {
         let v = parse_rsx(message).finish();
-        if let Ok(v) = v {
-            Ok(DioscriptAst { stats: v.1 })
+        if let Ok((text, ast)) = v {
+            if text.trim().is_empty() {
+                Ok(DioscriptAst { stats: ast })
+            } else {
+                let content = text.lines().next().unwrap_or("");
+                Err(ParseError::UnMatchContent {
+                    content: content.to_string(),
+                })
+            }
         } else {
             let err = v.err().unwrap();
             Err(ParseError::ParseFailure {

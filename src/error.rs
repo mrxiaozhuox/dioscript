@@ -11,8 +11,10 @@ pub enum Error {
 
 #[derive(Terr, Debug)]
 pub enum ParseError {
-    #[error("parse failure - [{kind:?}]: {text}")]
+    #[error("parser match failed - {kind:?} : {text}")]
     ParseFailure { kind: ErrorKind, text: String },
+    #[error("have unmatch content: {content}")]
+    UnMatchContent { content: String },
 }
 
 #[derive(Terr, Debug)]

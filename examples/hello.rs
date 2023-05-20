@@ -1,6 +1,6 @@
 use dioscript;
 fn main() {
-    let ast = dioscript::ast::DioscriptAst::from_string(include_str!("../test.rsx"));
+    let ast = dioscript::ast::DioscriptAst::from_string(include_str!("../scripts/test.ds"));
     match ast {
         Ok(ast) => {
             let mut runtime = dioscript::runtime::Runtime::new();
@@ -8,7 +8,7 @@ fn main() {
             println!("{:#?}", result);
         }
         Err(err) => {
-            panic!("{}", err.to_string());
+            println!("{}", err.to_string());
         }
     }
 }
