@@ -10,7 +10,7 @@ if @dark {
 }
 
 
-@enable_sub_componet = true;
+@enable_sub_component = true;
 @sub_component = div { "Hello world" };
 
 return div {
@@ -23,8 +23,8 @@ return div {
 			src: "avatar.jpg"
 		},
 		span { "YuKun Liu" },
-		if @enable_sub_conponent { 
-			return @sub_components;
+		if @enable_sub_component { 
+			return @sub_component;
 		},
 	}
 };

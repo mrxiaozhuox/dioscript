@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use crate::{
     ast::{CalculateMark, DioAstStatement, DioscriptAst, SubExpr},
+    element::Element,
     error::RuntimeError,
-    parser::CalcExpr,
     types::Value,
 };
 
@@ -14,22 +14,26 @@ pub struct Runtime {
     refs: HashMap<String, NodeId>,
     // scope tree: use for build scope structure.
     scope: Tree<ScopeType>,
+    // root scope: root tree id.
+    root_scope: NodeId,
 }
 
 impl Runtime {
     pub fn new() -> Self {
+        let mut scope = TreeBuilder::new().build();
+        let root = scope
+            .insert(Node::new(ScopeType::Block), id_tree::InsertBehavior::AsRoot)
+            .expect("Scope init failed.");
         Self {
             refs: HashMap::new(),
-            scope: TreeBuilder::new().build(),
+            scope,
+            root_scope: root,
         }
     }
 
     pub fn execute_ast(&mut self, ast: DioscriptAst) -> Result<Value, RuntimeError> {
-        let root = self
-            .scope
-            .insert(Node::new(ScopeType::Block), id_tree::InsertBehavior::AsRoot)
-            .expect("Scope init failed.");
-        let result = self.execute_scope(ast.stats, &root)?;
+        let root_id = self.root_scope.clone();
+        let result = self.execute_scope(ast.stats, &root_id)?;
         Ok(result)
     }
 
@@ -38,11 +42,8 @@ impl Runtime {
         statements: Vec<DioAstStatement>,
         current_scope: &NodeId,
     ) -> Result<Value, RuntimeError> {
-        let mut result: Option<CalcExpr> = None;
+        let mut result: Value = Value::None;
         for v in statements {
-            if result.is_some() {
-                break;
-            }
             match v {
                 crate::ast::DioAstStatement::ReferenceAss(var) => {
                     let name = var.0.clone();
@@ -51,7 +52,7 @@ impl Runtime {
                     let _scope = self.set_ref(&name, value, current_scope)?;
                 }
                 crate::ast::DioAstStatement::ReturnValue(r) => {
-                    result = Some(r.clone());
+                    result = self.execute_calculate(r.clone(), current_scope)?;
                 }
                 crate::ast::DioAstStatement::IfStatement(cond) => {
                     let sub_scope = self.scope.insert(
@@ -65,12 +66,10 @@ impl Runtime {
                     let state = self.execute_calculate(condition_expr, current_scope)?;
                     if let Value::Boolean(state) = state {
                         if state {
-                            let temp = self.execute_scope(inner_ast, &sub_scope)?;
-                            result = Some(temp.to_calc_expr());
+                            result = self.execute_scope(inner_ast, &sub_scope)?;
                         } else {
                             if let Some(otherwise) = otherwise {
-                                let temp = self.execute_scope(otherwise, &sub_scope)?;
-                                result = Some(temp.to_calc_expr());
+                                result = self.execute_scope(otherwise, &sub_scope)?;
                             }
                         }
                     } else {
@@ -81,12 +80,10 @@ impl Runtime {
                 }
             }
         }
-        if let Some(result) = result {
-            let result = self.execute_calculate(result, current_scope)?;
-            Ok(result)
-        } else {
-            Ok(Value::None)
+        if let Value::Element(e) = result {
+            result = Value::Element(self.execute_element(e, current_scope)?);
         }
+        return Ok(result);
     }
 
     fn execute_calculate(
@@ -141,31 +138,29 @@ impl Runtime {
         name: &str,
         current_scope: &NodeId,
     ) -> Result<(NodeId, Reference), RuntimeError> {
-        if let Some(scope) = self.refs.get(name) {
-            let data = self.scope.get(scope);
-            if let Ok(node) = data {
-                // loop to found all parent.
-                let mut parent = node;
+        if let Some(ref_scope) = self.refs.get(name) {
+            if let Ok(ref_node) = self.scope.get(ref_scope) {
                 let mut flag = false;
-                while let Some(curr) = parent.parent() {
-                    if curr == current_scope {
+                let ref_node_id = ref_node.parent().unwrap();
+                let mut curr_node_id = current_scope;
+
+                loop {
+                    if curr_node_id == ref_node_id {
                         flag = true;
                         break;
                     }
-                    parent = self.scope.get(curr).unwrap();
+                    if let Some(v) = self.scope.get(curr_node_id)?.parent() {
+                        curr_node_id = v;
+                    } else {
+                        break;
+                    }
                 }
-
                 if flag {
-                    return Ok((scope.clone(), node.data().clone().as_reference().unwrap()));
-                } else {
-                    return Err(RuntimeError::ReferenceNotFound {
-                        name: name.to_string(),
-                    });
+                    if let ScopeType::Reference(v) = ref_node.data() {
+                        println!("{v:?}");
+                        return Ok((ref_node_id.clone(), v.clone()));
+                    }
                 }
-            } else {
-                return Err(RuntimeError::ReferenceNotFound {
-                    name: name.to_string(),
-                });
             }
         }
         Err(RuntimeError::ReferenceNotFound {
@@ -179,6 +174,13 @@ impl Runtime {
         value: Value,
         current_scope: &NodeId,
     ) -> Result<NodeId, RuntimeError> {
+        let mut value = value;
+
+        // handle element data type
+        if let Value::Element(element) = &value {
+            value = Value::Element(self.execute_element(element.clone(), current_scope)?);
+        }
+
         if let Some(scope) = self.refs.get(name) {
             let mut refs = self
                 .scope
@@ -198,6 +200,78 @@ impl Runtime {
             self.refs.insert(name.to_string(), new_scope.clone());
             return Ok(new_scope);
         }
+    }
+
+    fn execute_element(
+        &mut self,
+        element: Element,
+        current_scope: &NodeId,
+    ) -> Result<Element, RuntimeError> {
+        let mut attrs = HashMap::new();
+        for i in element.attributes {
+            let name = i.0;
+            let data = i.1;
+            if let Value::Reference(r) = data {
+                let result = self.get_ref(&r, current_scope)?;
+                attrs.insert(name, result.1.value);
+            } else {
+                attrs.insert(name, data);
+            }
+        }
+        let mut content = vec![];
+        for i in element.content {
+            match i {
+                crate::element::ElementContentType::Children(v) => {
+                    let executed_element = self.execute_element(v, current_scope)?;
+                    content.push(crate::element::ElementContentType::Children(
+                        executed_element,
+                    ));
+                }
+                crate::element::ElementContentType::Content(v) => {
+                    content.push(crate::element::ElementContentType::Content(v));
+                }
+                crate::element::ElementContentType::Condition(v) => {
+                    let value = self.execute_calculate(v.condition.0.clone(), current_scope)?;
+                    let sub_scope = self.scope.insert(
+                        Node::new(ScopeType::Block),
+                        id_tree::InsertBehavior::UnderNode(current_scope),
+                    )?;
+                    if let Value::Boolean(b) = value {
+                        let mut temp = Value::None;
+                        if b {
+                            temp = self.execute_scope(v.inner, &sub_scope)?;
+                        } else {
+                            if let Some(otherwise) = v.otherwise {
+                                temp = self.execute_scope(otherwise, &sub_scope)?;
+                            }
+                        }
+                        println!("{:?}", temp);
+                        if let Value::Tuple((k, v)) = &temp {
+                            if let Value::String(k) = *k.clone() {
+                                attrs.insert(k.to_string(), *v.clone());
+                            }
+                        }
+                        if let Value::String(v) = &temp {
+                            content.push(crate::element::ElementContentType::Content(v.clone()));
+                        }
+                        if let Value::Element(v) = temp {
+                            content.push(crate::element::ElementContentType::Children(v));
+                        }
+                    }
+                }
+                crate::element::ElementContentType::Reference(v) => {
+                    let result = self.get_ref(&v, current_scope)?;
+                    if let Value::String(s) = result.1.value {
+                        content.push(crate::element::ElementContentType::Content(s));
+                    }
+                }
+            }
+        }
+        Ok(Element {
+            name: element.name,
+            attributes: attrs,
+            content,
+        })
     }
 }
 

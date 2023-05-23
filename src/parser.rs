@@ -389,6 +389,6 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
 
 #[test]
 fn hello() {
-    let v = parse_rsx(include_str!("../test.rsx"));
+    let v = parse_rsx(include_str!("../scripts/test.ds"));
     println!("{:#?}", v.unwrap().1);
 }
