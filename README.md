@@ -10,7 +10,7 @@
 
 @display_navbar = true;
 if !@display_navbar {
-    return "navbar unspport!";
+    return "unavailable navbar.";
 }
 
 return div {
