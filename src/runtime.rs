@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
@@ -43,7 +43,11 @@ impl Runtime {
         current_scope: &NodeId,
     ) -> Result<Value, RuntimeError> {
         let mut result: Value = Value::None;
+        let mut finish = false;
         for v in statements {
+            if finish {
+                break;
+            }
             match v {
                 crate::ast::DioAstStatement::ReferenceAss(var) => {
                     let name = var.0.clone();
@@ -53,6 +57,7 @@ impl Runtime {
                 }
                 crate::ast::DioAstStatement::ReturnValue(r) => {
                     result = self.execute_calculate(r.clone(), current_scope)?;
+                    finish = true;
                 }
                 crate::ast::DioAstStatement::IfStatement(cond) => {
                     let sub_scope = self.scope.insert(
@@ -67,9 +72,11 @@ impl Runtime {
                     if let Value::Boolean(state) = state {
                         if state {
                             result = self.execute_scope(inner_ast, &sub_scope)?;
+                            finish = true;
                         } else {
                             if let Some(otherwise) = otherwise {
                                 result = self.execute_scope(otherwise, &sub_scope)?;
+                                finish = true;
                             }
                         }
                     } else {
