@@ -16,7 +16,7 @@ pub enum Value {
     Dict(HashMap<String, Value>),
     Tuple((Box<Value>, Box<Value>)),
     Element(crate::element::Element),
-    Reference(String),
+    Variable(String),
 }
 
 impl Value {
@@ -30,7 +30,7 @@ impl Value {
             Value::Dict(_) => "dict",
             Value::Tuple(_) => "tuple",
             Value::Element(_) => "element",
-            Value::Reference(_) => "reference",
+            Value::Variable(_) => "variable",
         }
         .to_string()
     }
@@ -99,8 +99,8 @@ impl Value {
         }
     }
 
-    pub fn as_reference(&self) -> Option<String> {
-        if let Self::Reference(s) = self {
+    pub fn as_variable(&self) -> Option<String> {
+        if let Self::Variable(s) = self {
             Some(s.to_string())
         } else {
             None
@@ -154,7 +154,7 @@ impl Value {
                 Value::Dict(v) => Ok(Value::Boolean(v.clone() == o.as_dict().unwrap())),
                 Value::Tuple(v) => Ok(Value::Boolean(v.clone() == o.as_tuple().unwrap())),
                 Value::Element(v) => Ok(Value::Boolean(v.clone() == o.as_element().unwrap())),
-                Value::Reference(v) => Ok(Value::Boolean(v.to_string() == o.as_string().unwrap())),
+                Value::Variable(v) => Ok(Value::Boolean(v.to_string() == o.as_string().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "==".to_string(),
                     value_type: self.value_name(),
@@ -168,7 +168,7 @@ impl Value {
                 Value::Dict(v) => Ok(Value::Boolean(v.clone() != o.as_dict().unwrap())),
                 Value::Tuple(v) => Ok(Value::Boolean(v.clone() != o.as_tuple().unwrap())),
                 Value::Element(v) => Ok(Value::Boolean(v.clone() != o.as_element().unwrap())),
-                Value::Reference(v) => Ok(Value::Boolean(v.to_string() != o.as_string().unwrap())),
+                Value::Variable(v) => Ok(Value::Boolean(v.to_string() != o.as_string().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
                     operator: "!=".to_string(),
                     value_type: self.value_name(),

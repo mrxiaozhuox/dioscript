@@ -10,8 +10,8 @@ use crate::{
 };
 
 pub struct Runtime {
-    // reference content: use for save reference node-id.
-    refs: HashMap<String, NodeId>,
+    // variable content: use for save variable node-id.
+    vars: HashMap<String, NodeId>,
     // scope tree: use for build scope structure.
     scope: Tree<ScopeType>,
     // root scope: root tree id.
@@ -25,7 +25,7 @@ impl Runtime {
             .insert(Node::new(ScopeType::Block), id_tree::InsertBehavior::AsRoot)
             .expect("Scope init failed.");
         Self {
-            refs: HashMap::new(),
+            vars: HashMap::new(),
             scope,
             root_scope: root,
         }
@@ -49,7 +49,7 @@ impl Runtime {
                 break;
             }
             match v {
-                crate::ast::DioAstStatement::ReferenceAss(var) => {
+                crate::ast::DioAstStatement::VariableAss(var) => {
                     let name = var.0.clone();
                     let value = var.1.clone();
                     let value = self.execute_calculate(value, current_scope)?;
@@ -106,7 +106,7 @@ impl Runtime {
                 SubExpr::Single(info) => {
                     let mut content = info.1;
 
-                    if let Value::Reference(r) = &content {
+                    if let Value::Variable(r) = &content {
                         let (_, data) = self.get_ref(r, current_scope)?;
                         content = data.value.clone();
                     }
@@ -144,8 +144,8 @@ impl Runtime {
         &self,
         name: &str,
         current_scope: &NodeId,
-    ) -> Result<(NodeId, Reference), RuntimeError> {
-        if let Some(ref_scope) = self.refs.get(name) {
+    ) -> Result<(NodeId, Variable), RuntimeError> {
+        if let Some(ref_scope) = self.vars.get(name) {
             if let Ok(ref_node) = self.scope.get(ref_scope) {
                 let mut flag = false;
                 let ref_node_id = ref_node.parent().unwrap();
@@ -163,14 +163,14 @@ impl Runtime {
                     }
                 }
                 if flag {
-                    if let ScopeType::Reference(v) = ref_node.data() {
+                    if let ScopeType::Variable(v) = ref_node.data() {
                         println!("{v:?}");
                         return Ok((ref_node_id.clone(), v.clone()));
                     }
                 }
             }
         }
-        Err(RuntimeError::ReferenceNotFound {
+        Err(RuntimeError::VariableNotFound {
             name: name.to_string(),
         })
     }
@@ -188,23 +188,18 @@ impl Runtime {
             value = Value::Element(self.execute_element(element.clone(), current_scope)?);
         }
 
-        if let Some(scope) = self.refs.get(name) {
-            let mut refs = self
-                .scope
-                .get_mut(scope)?
-                .data_mut()
-                .as_reference()
-                .unwrap();
-            // change reference value
-            refs.value = value;
-            refs.counter += 1;
+        if let Some(scope) = self.vars.get(name) {
+            let mut vars = self.scope.get_mut(scope)?.data_mut().as_variable().unwrap();
+            // change variable value
+            vars.value = value;
+            vars.counter += 1;
             return Ok(scope.clone());
         } else {
             let new_scope = self.scope.insert(
-                Node::new(ScopeType::Reference(Reference { value, counter: 1 })),
+                Node::new(ScopeType::Variable(Variable { value, counter: 1 })),
                 id_tree::InsertBehavior::UnderNode(current_scope),
             )?;
-            self.refs.insert(name.to_string(), new_scope.clone());
+            self.vars.insert(name.to_string(), new_scope.clone());
             return Ok(new_scope);
         }
     }
@@ -218,7 +213,7 @@ impl Runtime {
         for i in element.attributes {
             let name = i.0;
             let data = i.1;
-            if let Value::Reference(r) = data {
+            if let Value::Variable(r) = data {
                 let result = self.get_ref(&r, current_scope)?;
                 attrs.insert(name, result.1.value);
             } else {
@@ -266,7 +261,7 @@ impl Runtime {
                         }
                     }
                 }
-                crate::element::ElementContentType::Reference(v) => {
+                crate::element::ElementContentType::Variable(v) => {
                     let result = self.get_ref(&v, current_scope)?;
                     if let Value::String(s) = result.1.value {
                         content.push(crate::element::ElementContentType::Content(s));
@@ -285,12 +280,12 @@ impl Runtime {
 #[derive(Debug, Clone)]
 pub enum ScopeType {
     Block,
-    Reference(Reference),
+    Variable(Variable),
 }
 
 impl ScopeType {
-    pub fn as_reference(&self) -> Option<Reference> {
-        if let Self::Reference(r) = self {
+    pub fn as_variable(&self) -> Option<Variable> {
+        if let Self::Variable(r) = self {
             return Some(r.clone());
         }
         None
@@ -298,7 +293,7 @@ impl ScopeType {
 }
 
 #[derive(Debug, Clone)]
-pub struct Reference {
+pub struct Variable {
     pub value: Value,
     pub counter: u32,
 }

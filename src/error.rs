@@ -28,8 +28,8 @@ pub enum RuntimeError {
     #[error("cannot compare different data type: `{a}` and `{b}`.")]
     CompareDiffType { a: String, b: String },
 
-    #[error("reference `{name}` not found.")]
-    ReferenceNotFound { name: String },
+    #[error("variable `{name}` not found.")]
+    VariableNotFound { name: String },
 
     #[error("scope node id have some problem.")]
     ScopeNodeIdProblem(#[from] id_tree::NodeIdError),

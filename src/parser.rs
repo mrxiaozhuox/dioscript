@@ -22,7 +22,7 @@ enum AttributeType {
     Attribute((String, Value)),
     Content(String),
     Element(crate::element::Element),
-    Reference(String),
+    Variable(String),
     Condition(ConditionalStatement),
 }
 
@@ -99,10 +99,10 @@ impl TypeParser {
         )(message)
     }
 
-    fn reference(message: &str) -> IResult<&str, String> {
+    fn variable(message: &str) -> IResult<&str, String> {
         context(
-            "reference",
-            map(pair(tag("@"), ReferenceParser::parse_var_name), |v| {
+            "variable",
+            map(pair(tag("@"), VariableParser::parse_var_name), |v| {
                 v.1.to_string()
             }),
         )(message)
@@ -162,15 +162,15 @@ impl TypeParser {
                 map(TypeParser::list, Value::List),
                 map(TypeParser::dict, Value::Dict),
                 map(TypeParser::tuple, Value::Tuple),
-                map(TypeParser::reference, Value::Reference),
+                map(TypeParser::variable, Value::Variable),
                 map(ElementParser::parse, Value::Element),
             )),
         )(&message)
     }
 }
 
-struct ReferenceParser;
-impl ReferenceParser {
+struct VariableParser;
+impl VariableParser {
     fn var_name_style(c: char) -> bool {
         matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
     }
@@ -317,10 +317,10 @@ impl ElementParser {
                                 map(
                                     delimited(
                                         multispace0,
-                                        pair(tag("@"), ReferenceParser::parse_var_name),
+                                        pair(tag("@"), VariableParser::parse_var_name),
                                         multispace0,
                                     ),
-                                    |v| AttributeType::Reference(v.1.to_string()),
+                                    |v| AttributeType::Variable(v.1.to_string()),
                                 ),
                                 map(
                                     delimited(multispace0, StatementParser::parse_if, multispace0),
@@ -345,8 +345,8 @@ impl ElementParser {
                             AttributeType::Element(e) => {
                                 content.push(ElementContentType::Children(e));
                             }
-                            AttributeType::Reference(s) => {
-                                content.push(ElementContentType::Reference(s));
+                            AttributeType::Variable(s) => {
+                                content.push(ElementContentType::Variable(s));
                             }
                             AttributeType::Condition(c) => {
                                 content.push(ElementContentType::Condition(c));
@@ -371,8 +371,8 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
         many0(delimited(
             multispace0,
             alt((
-                map(ReferenceParser::parse, |v| {
-                    DioAstStatement::ReferenceAss((v.0.to_string(), v.1.clone()))
+                map(VariableParser::parse, |v| {
+                    DioAstStatement::VariableAss((v.0.to_string(), v.1.clone()))
                 }),
                 map(
                     delimited(tag("return "), StatementParser::expr, tag(";")),

@@ -14,5 +14,5 @@ pub enum ElementContentType {
     Children(Element),
     Content(String),
     Condition(crate::ast::ConditionalStatement),
-    Reference(String),
+    Variable(String),
 }

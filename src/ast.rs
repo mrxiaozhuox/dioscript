@@ -35,7 +35,7 @@ impl DioscriptAst {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DioAstStatement {
-    ReferenceAss((String, CalcExpr)),
+    VariableAss((String, CalcExpr)),
     ReturnValue(CalcExpr),
     IfStatement(ConditionalStatement),
 }
