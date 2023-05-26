@@ -1,28 +1,31 @@
-@name = "hello rsx";
-@dark = false;
+@title = "hello rsx";
 
-@root_class = "bg-gray-800";
 
-@data = ["u1", "u2", "u3"];
-
+@dark = true;
 if @dark {
-	return "dark theme unsupport.";
+	return div { "dark theme unsupport." };
 }
 
 
-@enable_sub_component = true;
-@sub_component = div { "Hello world" };
+@enable_sub_component = false;
+@sub_component = div {
+	class: "text-gray-500",
+	"this is a conditional content"
+};
 
 return div {
-	class: @root_class,
-	h1 { "title" },
-	h2 { name: "hello" },
+	class: "container mx-auto",
+	h1 {
+		class: "font-bold text-5xl",
+		@title
+	},
+	hr {},
 	div {
-		class: "prose",
+		class: "mt-4",
 		img {
-			src: "avatar.jpg"
+			src: "https://avatars.githubusercontent.com/u/41265098?s=150&v=4"
 		},
-		span { "YuKun Liu" },
+		span { class: "font-semibold text-2xl", "YuKun Liu" },
 		if @enable_sub_component { 
 			return @sub_component;
 		},

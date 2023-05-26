@@ -5,7 +5,7 @@ use id_tree::{Node, NodeId, Tree, TreeBuilder};
 use crate::{
     ast::{CalculateMark, DioAstStatement, DioscriptAst, SubExpr},
     element::AstElement,
-    error::RuntimeError,
+    error::{Error, RuntimeError},
     types::{AstValue, Value},
 };
 
@@ -29,6 +29,11 @@ impl Runtime {
             scope,
             root_scope: root,
         }
+    }
+
+    pub fn execute(&mut self, code: &str) -> Result<Value, Error> {
+        let ast = DioscriptAst::from_string(code)?;
+        Ok(self.execute_ast(ast)?)
     }
 
     pub fn execute_ast(&mut self, ast: DioscriptAst) -> Result<Value, RuntimeError> {
@@ -164,7 +169,6 @@ impl Runtime {
                 }
                 if flag {
                     if let ScopeType::Variable(v) = ref_node.data() {
-                        println!("{v:?}");
                         return Ok((ref_node_id.clone(), v.clone()));
                     }
                 }
@@ -247,7 +251,6 @@ impl Runtime {
                                 temp = self.execute_scope(otherwise, &sub_scope)?;
                             }
                         }
-                        println!("{:?}", temp);
                         if let AstValue::Tuple((k, v)) = &temp {
                             if let AstValue::String(k) = *k.clone() {
                                 attrs.insert(k.to_string(), *v.clone());
