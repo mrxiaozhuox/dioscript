@@ -14,14 +14,14 @@ use nom::{
 
 use crate::{
     ast::{CalculateMark, ConditionalExpr, ConditionalStatement, DioAstStatement, SubExpr},
-    element::ElementContentType,
-    types::Value,
+    element::AstElementContentType,
+    types::AstValue,
 };
 
 enum AttributeType {
-    Attribute((String, Value)),
+    Attribute((String, AstValue)),
     Content(String),
-    Element(crate::element::Element),
+    Element(crate::element::AstElement),
     Variable(String),
     Condition(ConditionalStatement),
 }
@@ -85,7 +85,7 @@ impl TypeParser {
         double(message)
     }
 
-    pub fn list(message: &str) -> IResult<&str, Vec<Value>> {
+    pub fn list(message: &str) -> IResult<&str, Vec<AstValue>> {
         context(
             "list",
             delimited(
@@ -108,7 +108,7 @@ impl TypeParser {
         )(message)
     }
 
-    fn dict(message: &str) -> IResult<&str, HashMap<String, Value>> {
+    fn dict(message: &str) -> IResult<&str, HashMap<String, AstValue>> {
         context(
             "object",
             delimited(
@@ -122,7 +122,7 @@ impl TypeParser {
                             delimited(multispace0, TypeParser::parse, multispace0),
                         ),
                     ),
-                    |tuple_vec: Vec<(&str, Value)>| {
+                    |tuple_vec: Vec<(&str, AstValue)>| {
                         tuple_vec
                             .into_iter()
                             .map(|(k, v)| (String::from(k), v))
@@ -134,7 +134,7 @@ impl TypeParser {
         )(message)
     }
 
-    fn tuple(message: &str) -> IResult<&str, (Box<Value>, Box<Value>)> {
+    fn tuple(message: &str) -> IResult<&str, (Box<AstValue>, Box<AstValue>)> {
         context(
             "tuple",
             delimited(
@@ -145,25 +145,25 @@ impl TypeParser {
                         tag(","),
                         delimited(multispace0, TypeParser::parse, multispace0),
                     ),
-                    |pair: (Value, Value)| (Box::new(pair.0), Box::new(pair.1)),
+                    |pair: (AstValue, AstValue)| (Box::new(pair.0), Box::new(pair.1)),
                 ),
                 tag(")"),
             ),
         )(message)
     }
 
-    pub fn parse(message: &str) -> IResult<&str, Value> {
+    pub fn parse(message: &str) -> IResult<&str, AstValue> {
         context(
             "value",
             alt((
-                map(TypeParser::number, Value::Number),
-                map(TypeParser::boolean, Value::Boolean),
-                map(TypeParser::string, |s| Value::String(String::from(s))),
-                map(TypeParser::list, Value::List),
-                map(TypeParser::dict, Value::Dict),
-                map(TypeParser::tuple, Value::Tuple),
-                map(TypeParser::variable, Value::Variable),
-                map(ElementParser::parse, Value::Element),
+                map(TypeParser::number, AstValue::Number),
+                map(TypeParser::boolean, AstValue::Boolean),
+                map(TypeParser::string, |s| AstValue::String(String::from(s))),
+                map(TypeParser::list, AstValue::List),
+                map(TypeParser::dict, AstValue::Dict),
+                map(TypeParser::tuple, AstValue::Tuple),
+                map(TypeParser::variable, AstValue::Variable),
+                map(ElementParser::parse, AstValue::Element),
             )),
         )(&message)
     }
@@ -283,7 +283,7 @@ impl ElementParser {
         context("element name", take_while1(Self::attr_name_style))(message)
     }
 
-    fn parse(message: &str) -> IResult<&str, crate::element::Element> {
+    fn parse(message: &str) -> IResult<&str, crate::element::AstElement> {
         context(
             "element",
             map(
@@ -332,7 +332,7 @@ impl ElementParser {
                     ),
                 ),
                 |(name, attrs)| {
-                    let mut attr: HashMap<String, Value> = HashMap::new();
+                    let mut attr: HashMap<String, AstValue> = HashMap::new();
                     let mut content = vec![];
                     for a in attrs {
                         match a {
@@ -340,20 +340,20 @@ impl ElementParser {
                                 attr.insert(key, value);
                             }
                             AttributeType::Content(c) => {
-                                content.push(ElementContentType::Content(c));
+                                content.push(AstElementContentType::Content(c));
                             }
                             AttributeType::Element(e) => {
-                                content.push(ElementContentType::Children(e));
+                                content.push(AstElementContentType::Children(e));
                             }
                             AttributeType::Variable(s) => {
-                                content.push(ElementContentType::Variable(s));
+                                content.push(AstElementContentType::Variable(s));
                             }
                             AttributeType::Condition(c) => {
-                                content.push(ElementContentType::Condition(c));
+                                content.push(AstElementContentType::Condition(c));
                             }
                         }
                     }
-                    let el = crate::element::Element {
+                    let el = crate::element::AstElement {
                         name: name.to_string(),
                         attributes: attr,
                         content,

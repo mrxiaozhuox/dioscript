@@ -3,7 +3,7 @@ use nom::Finish;
 use crate::{
     error::ParseError,
     parser::{parse_rsx, CalcExpr},
-    types::Value,
+    types::AstValue,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,7 +52,7 @@ pub struct ConditionalExpr(pub Vec<(CalculateMark, SubExpr)>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubExpr {
-    Single((bool, Value)),
+    Single((bool, AstValue)),
     Pair(ConditionalExpr),
 }
 
