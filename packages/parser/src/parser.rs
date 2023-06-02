@@ -3,30 +3,47 @@ use std::collections::HashMap;
 use nom::{
     branch::alt,
     bytes::complete::{escaped, tag, tag_no_case, take_till1, take_while1, take_while_m_n},
-    character::complete::{alphanumeric1, multispace0, space0, space1},
+    character::complete::{alphanumeric1, char, multispace0, space0, space1},
     combinator::{map, opt, peek, value},
     error::context,
-    multi::{fold_many1, many0, separated_list0},
+    multi::{fold_many0, many0, separated_list0},
     number::complete::double,
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
 
 use crate::{
-    ast::{CalculateMark, ConditionalExpr, ConditionalStatement, DioAstStatement, SubExpr},
-    element::AstElementContentType,
+    ast::{ConditionalStatement, DioAstStatement, LoopStatement},
+    element::{AstElementContentType, AstElement},
     types::AstValue,
 };
 
 enum AttributeType {
     Attribute((String, AstValue)),
     Content(String),
-    Element(crate::element::AstElement),
+    Element(AstElement),
     Variable(String),
     Condition(ConditionalStatement),
+    Loop(LoopStatement),
 }
 
-pub(crate) type CalcExpr = Vec<(CalculateMark, SubExpr)>;
+#[derive(Debug, Clone, PartialEq)]
+pub enum CalcExpr {
+    Value(AstValue),
+    Add(Box<CalcExpr>, Box<CalcExpr>),
+    Sub(Box<CalcExpr>, Box<CalcExpr>),
+    Mul(Box<CalcExpr>, Box<CalcExpr>),
+    Div(Box<CalcExpr>, Box<CalcExpr>),
+    Mod(Box<CalcExpr>, Box<CalcExpr>),
+    Eq(Box<CalcExpr>, Box<CalcExpr>),
+    Ne(Box<CalcExpr>, Box<CalcExpr>),
+    Gt(Box<CalcExpr>, Box<CalcExpr>),
+    Lt(Box<CalcExpr>, Box<CalcExpr>),
+    Ge(Box<CalcExpr>, Box<CalcExpr>),
+    Le(Box<CalcExpr>, Box<CalcExpr>),
+    And(Box<CalcExpr>, Box<CalcExpr>),
+    Or(Box<CalcExpr>, Box<CalcExpr>),
+}
 
 struct TypeParser;
 impl TypeParser {
@@ -108,6 +125,19 @@ impl TypeParser {
         )(message)
     }
 
+    fn variable_index(message: &str) -> IResult<&str, (String, Box<AstValue>)> {
+        context(
+            "variable index",
+            map(
+                tuple((
+                    preceded(tag("@"), VariableParser::parse_var_name),
+                    delimited(tag("["), TypeParser::parse_index_type, tag("]")),
+                )),
+                |v| (v.0.to_string(), Box::new(v.1)),
+            ),
+        )(message)
+    }
+
     fn dict(message: &str) -> IResult<&str, HashMap<String, AstValue>> {
         context(
             "object",
@@ -152,6 +182,17 @@ impl TypeParser {
         )(message)
     }
 
+    fn parse_index_type(message: &str) -> IResult<&str, AstValue> {
+        context(
+            "value",
+            alt((
+                map(TypeParser::number, AstValue::Number),
+                map(TypeParser::string, |s| AstValue::String(String::from(s))),
+                map(TypeParser::variable, AstValue::Variable),
+            )),
+        )(message)
+    }
+
     pub fn parse(message: &str) -> IResult<&str, AstValue> {
         context(
             "value",
@@ -159,13 +200,14 @@ impl TypeParser {
                 map(TypeParser::number, AstValue::Number),
                 map(TypeParser::boolean, AstValue::Boolean),
                 map(TypeParser::string, |s| AstValue::String(String::from(s))),
+                map(TypeParser::variable_index, AstValue::VariableIndex),
+                map(TypeParser::variable, AstValue::Variable),
                 map(TypeParser::list, AstValue::List),
                 map(TypeParser::dict, AstValue::Dict),
                 map(TypeParser::tuple, AstValue::Tuple),
-                map(TypeParser::variable, AstValue::Variable),
                 map(ElementParser::parse, AstValue::Element),
             )),
-        )(&message)
+        )(message)
     }
 }
 
@@ -189,7 +231,7 @@ impl VariableParser {
                         Self::parse_var_name,
                         delimited(space0, tag("="), space0),
                     ),
-                    StatementParser::expr,
+                    CalculateParser::expr,
                     tag(";"),
                 )),
                 |v| (v.0.to_string(), v.1),
@@ -198,56 +240,64 @@ impl VariableParser {
     }
 }
 
-struct StatementParser;
-impl StatementParser {
-    pub fn expr(message: &str) -> IResult<&str, CalcExpr> {
-        context(
-            "conditional",
-            fold_many1(
-                pair(
-                    opt(alt((
-                        delimited(multispace0, tag("+"), multispace0),
-                        delimited(multispace0, tag("-"), multispace0),
-                        delimited(multispace0, tag("*"), multispace0),
-                        delimited(multispace0, tag("/"), multispace0),
-                        delimited(multispace0, tag("=="), multispace0),
-                        delimited(multispace0, tag("!="), multispace0),
-                        delimited(multispace0, tag(">"), multispace0),
-                        delimited(multispace0, tag("<"), multispace0),
-                        delimited(multispace0, tag(">="), multispace0),
-                        delimited(multispace0, tag("<="), multispace0),
-                        delimited(multispace0, tag("&&"), multispace0),
-                        delimited(multispace0, tag("||"), multispace0),
-                    ))),
-                    alt((
-                        map(
-                            pair(opt(tag("!")), terminated(TypeParser::parse, space0)),
-                            |v| SubExpr::Single((v.0.is_some(), v.1.clone())),
-                        ),
-                        map(
-                            delimited(pair(tag("("), space0), Self::expr, pair(space0, tag(")"))),
-                            |v| SubExpr::Pair(ConditionalExpr(v)),
-                        ),
-                    )),
-                ),
-                Vec::new,
-                |mut arr: Vec<_>, (sign, value)| {
-                    arr.push((
-                        CalculateMark::from_string(sign.unwrap_or("").to_string()),
-                        value,
-                    ));
-                    arr
+struct CalculateParser;
+impl CalculateParser {
+    fn factor(input: &str) -> IResult<&str, CalcExpr> {
+        delimited(
+            space0,
+            alt((
+                map(TypeParser::parse, |v| CalcExpr::Value(v)),
+                delimited(char('('), Self::expr, char(')')),
+            )),
+            space0,
+        )(input)
+    }
+
+    fn term(input: &str) -> IResult<&str, CalcExpr> {
+        let (input, init) = Self::factor(input)?;
+        delimited(
+            space0,
+            fold_many0(
+                pair(alt((char('*'), char('/'), char('%'))), Self::factor),
+                move || init.clone(),
+                |acc, (op, val)| match op {
+                    '*' => CalcExpr::Mul(Box::new(acc), Box::new(val)),
+                    '/' => CalcExpr::Div(Box::new(acc), Box::new(val)),
+                    '%' => CalcExpr::Mod(Box::new(acc), Box::new(val)),
+                    _ => unreachable!(),
                 },
             ),
-        )(message)
+            space0,
+        )(input)
     }
+
+    fn expr(input: &str) -> IResult<&str, CalcExpr> {
+        let (input, init) = Self::term(input)?;
+        delimited(
+            space0,
+            fold_many0(
+                pair(alt((char('+'), char('-'))), Self::term),
+                move || init.clone(),
+                |acc, (op, val)| match op {
+                    '+' => CalcExpr::Add(Box::new(acc), Box::new(val)),
+                    '-' => CalcExpr::Sub(Box::new(acc), Box::new(val)),
+                    _ => unreachable!(),
+                },
+            ),
+            space0,
+        )(input)
+    }
+}
+
+struct StatementParser;
+impl StatementParser {
     fn parse_if(message: &str) -> IResult<&str, ConditionalStatement> {
         context(
             "if statment",
             map(
                 tuple((
                     pair(tag("if"), space1),
-                    terminated(Self::expr, pair(space0, tag("{"))),
+                    terminated(CalculateParser::expr, pair(space0, tag("{"))),
                     delimited(multispace0, parse_rsx, pair(multispace0, tag("}"))),
                     opt(delimited(
                         delimited(
@@ -260,9 +310,45 @@ impl StatementParser {
                     )),
                 )),
                 |(_, cond, inner, otherwise)| ConditionalStatement {
-                    condition: ConditionalExpr(cond),
+                    condition: cond,
                     inner,
                     otherwise,
+                },
+            ),
+        )(message)
+    }
+    fn parse_for(message: &str) -> IResult<&str, LoopStatement> {
+        context(
+            "for statement",
+            map(
+                tuple((
+                    pair(tag("for"), space1),
+                    pair(TypeParser::variable, pair(space1, tag("in"))),
+                    delimited(space1, TypeParser::parse, pair(space0, tag("{"))),
+                    delimited(multispace0, parse_rsx, pair(multispace0, tag("}"))),
+                )),
+                |(_, (var_name, _), iter, inner)| LoopStatement {
+                    execute_type: crate::ast::LoopExecuteType::Iter {
+                        iter,
+                        var: var_name,
+                    },
+                    inner,
+                },
+            ),
+        )(message)
+    }
+    fn parse_while(message: &str) -> IResult<&str, LoopStatement> {
+        context(
+            "while statement",
+            map(
+                tuple((
+                    pair(tag("while"), space1),
+                    terminated(CalculateParser::expr, pair(space0, tag("{"))),
+                    delimited(multispace0, parse_rsx, pair(multispace0, tag("}"))),
+                )),
+                |(_, expr, inner)| LoopStatement {
+                    execute_type: crate::ast::LoopExecuteType::Conditional(expr),
+                    inner,
                 },
             ),
         )(message)
@@ -283,7 +369,7 @@ impl ElementParser {
         context("element name", take_while1(Self::attr_name_style))(message)
     }
 
-    fn parse(message: &str) -> IResult<&str, crate::element::AstElement> {
+    fn parse(message: &str) -> IResult<&str, AstElement> {
         context(
             "element",
             map(
@@ -326,6 +412,18 @@ impl ElementParser {
                                     delimited(multispace0, StatementParser::parse_if, multispace0),
                                     |v| AttributeType::Condition(v),
                                 ),
+                                map(
+                                    delimited(multispace0, StatementParser::parse_for, multispace0),
+                                    |v| AttributeType::Loop(v),
+                                ),
+                                map(
+                                    delimited(
+                                        multispace0,
+                                        StatementParser::parse_while,
+                                        multispace0,
+                                    ),
+                                    |v| AttributeType::Loop(v),
+                                ),
                             )),
                         ),
                         delimited(opt(tag(",")), multispace0, tag("}")),
@@ -351,9 +449,12 @@ impl ElementParser {
                             AttributeType::Condition(c) => {
                                 content.push(AstElementContentType::Condition(c));
                             }
+                            AttributeType::Loop(l) => {
+                                content.push(AstElementContentType::Loop(l));
+                            }
                         }
                     }
-                    let el = crate::element::AstElement {
+                    let el = AstElement {
                         name: name.to_string(),
                         attributes: attr,
                         content,
@@ -375,20 +476,20 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
                     DioAstStatement::VariableAss((v.0.to_string(), v.1.clone()))
                 }),
                 map(
-                    delimited(tag("return "), StatementParser::expr, tag(";")),
+                    delimited(tag("return "), CalculateParser::expr, tag(";")),
                     |v| DioAstStatement::ReturnValue(v),
                 ),
                 map(StatementParser::parse_if, |v| {
                     DioAstStatement::IfStatement(v)
                 }),
+                map(StatementParser::parse_for, |v| {
+                    DioAstStatement::LoopStatement(v)
+                }),
+                map(StatementParser::parse_while, |v| {
+                    DioAstStatement::LoopStatement(v)
+                }),
             )),
             multispace0,
         )),
     )(message)
-}
-
-#[test]
-fn hello() {
-    let v = parse_rsx(include_str!("../scripts/test.ds"));
-    println!("{:#?}", v.unwrap().1);
 }

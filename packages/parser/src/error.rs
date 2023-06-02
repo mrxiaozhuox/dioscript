@@ -1,7 +1,7 @@
 use nom::error::ErrorKind;
-use thiserror::Error as Terr;
+use thiserror::Error as ThisError;
 
-#[derive(Terr, Debug)]
+#[derive(ThisError, Debug)]
 pub enum Error {
     #[error("runtime execute failed.")]
     Runtime(#[from] RuntimeError),
@@ -9,15 +9,15 @@ pub enum Error {
     Parse(#[from] ParseError),
 }
 
-#[derive(Terr, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum ParseError {
-    #[error("parser match failed - {kind:?} : {text}")]
+    #[error("[ParseFailed] parser match failed - {kind:?} : {text}")]
     ParseFailure { kind: ErrorKind, text: String },
-    #[error("have unmatch content: {content}")]
+    #[error("[ParseFailed] have unmatch content: `{content}`")]
     UnMatchContent { content: String },
 }
 
-#[derive(Terr, Debug)]
+#[derive(ThisError, Debug)]
 pub enum RuntimeError {
     #[error("cannot use `{operator}` operator to `{value_type}` type data.")]
     IllegalOperatorForType {
@@ -36,4 +36,13 @@ pub enum RuntimeError {
 
     #[error("cannot use `{value_type}` in conditional statement.")]
     IllegalTypeInConditional { value_type: String },
+
+    #[error("cannot get `{index_type}` type index from `{value_type}` data.")]
+    IllegalIndexType {
+        index_type: String,
+        value_type: String,
+    },
+
+    #[error("cannot find `{index}` in `{value}` value.")]
+    IndexNotFound { index: String, value: String },
 }

@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{
-    ast::{CalculateMark, SubExpr},
-    error::RuntimeError,
-    parser::CalcExpr,
-};
+use crate::{ast::CalculateMark, error::RuntimeError, element::{AstElement, Element}};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstValue {
@@ -15,8 +11,9 @@ pub enum AstValue {
     List(Vec<AstValue>),
     Dict(HashMap<String, AstValue>),
     Tuple((Box<AstValue>, Box<AstValue>)),
-    Element(crate::element::AstElement),
+    Element(AstElement),
     Variable(String),
+    VariableIndex((String, Box<AstValue>)),
 }
 
 impl AstValue {
@@ -31,6 +28,7 @@ impl AstValue {
             AstValue::Tuple(_) => "tuple",
             AstValue::Element(_) => "element",
             AstValue::Variable(_) => "variable",
+            AstValue::VariableIndex(_) => "variable[index]",
         }
         .to_string()
     }
@@ -91,7 +89,7 @@ impl AstValue {
         }
     }
 
-    pub fn as_element(&self) -> Option<crate::element::AstElement> {
+    pub fn as_element(&self) -> Option<AstElement> {
         if let Self::Element(s) = self {
             Some(s.clone())
         } else {
@@ -231,8 +229,23 @@ impl AstValue {
         };
     }
 
-    pub fn to_calc_expr(&self) -> CalcExpr {
-        vec![(CalculateMark::None, SubExpr::Single((false, self.clone())))]
+    pub fn to_boolean_data(&self) -> bool {
+        match self {
+            AstValue::None => false,
+            AstValue::String(_) => false,
+            AstValue::Number(v) => *v != 0.0,
+            AstValue::Boolean(v) => *v,
+            AstValue::List(_) => false,
+            AstValue::Dict(_) => false,
+            AstValue::Tuple(v) => {
+                let a = v.0.clone();
+                let b = v.1.clone();
+                a.to_boolean_data() && b.to_boolean_data()
+            }
+            AstValue::Element(_) => false,
+            AstValue::Variable(_) => false,
+            AstValue::VariableIndex(_) => false,
+        }
     }
 }
 
@@ -245,7 +258,7 @@ pub enum Value {
     List(Vec<Value>),
     Dict(HashMap<String, Value>),
     Tuple((Box<Value>, Box<Value>)),
-    Element(crate::element::Element),
+    Element(Element),
 }
 
 impl Value {
@@ -271,8 +284,9 @@ impl Value {
                 Box::new(Value::from_ast_value(*v.0)),
                 Box::new(Value::from_ast_value(*v.1)),
             )),
-            AstValue::Element(v) => Value::Element(crate::element::Element::from_ast_element(v)),
+            AstValue::Element(v) => Value::Element(Element::from_ast_element(v)),
             AstValue::Variable(_) => Value::None,
+            AstValue::VariableIndex(_) => Value::None,
         }
     }
 }

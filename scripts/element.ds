@@ -1,17 +1,19 @@
 @title = "hello rsx";
 
-
-@dark = true;
+@dark = false;
 if @dark {
 	return div { "dark theme unsupport." };
 }
 
-
-@enable_sub_component = false;
+@enable_sub_component = true;
 @sub_component = div {
 	class: "text-gray-500",
 	"this is a conditional content"
 };
+
+
+@data = [1,2,3];
+@a = @data[1];
 
 return div {
 	class: "container mx-auto",
@@ -25,9 +27,15 @@ return div {
 		img {
 			src: "https://avatars.githubusercontent.com/u/41265098?s=150&v=4"
 		},
-		span { class: "font-semibold text-2xl", "YuKun Liu" },
+		p { class: "font-semibold text-2xl", "YuKun Liu" },
 		if @enable_sub_component { 
 			return @sub_component;
 		},
+		p {
+			for @i in @data {
+				@v = @i["name"];
+				return p { @v };
+			}
+		}
 	}
 };

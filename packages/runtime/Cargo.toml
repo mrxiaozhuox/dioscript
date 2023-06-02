@@ -1,0 +1,11 @@
+[package]
+name = "dioscript-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+dioscript-parser = { path = "../parser" }
+
+id_tree = "1.8.0"
+thiserror = "1.0.40"

@@ -38,22 +38,26 @@ pub enum DioAstStatement {
     VariableAss((String, CalcExpr)),
     ReturnValue(CalcExpr),
     IfStatement(ConditionalStatement),
+    LoopStatement(LoopStatement),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConditionalStatement {
-    pub condition: ConditionalExpr,
+    pub condition: CalcExpr,
     pub inner: Vec<DioAstStatement>,
     pub otherwise: Option<Vec<DioAstStatement>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConditionalExpr(pub Vec<(CalculateMark, SubExpr)>);
+pub struct LoopStatement {
+    pub execute_type: LoopExecuteType,
+    pub inner: Vec<DioAstStatement>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SubExpr {
-    Single((bool, AstValue)),
-    Pair(ConditionalExpr),
+pub enum LoopExecuteType {
+    Conditional(CalcExpr),
+    Iter { iter: AstValue, var: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]

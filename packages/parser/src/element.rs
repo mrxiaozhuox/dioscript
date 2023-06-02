@@ -14,6 +14,7 @@ pub enum AstElementContentType {
     Children(AstElement),
     Content(String),
     Condition(crate::ast::ConditionalStatement),
+    Loop(crate::ast::LoopStatement),
     Variable(String),
 }
 
