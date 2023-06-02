@@ -1,0 +1,12 @@
+[package]
+name = "ds"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+clap = { version = "4.3.1", features = ["derive"] }
+
+dioscript-parser = { path = "../parser" }
+dioscript-runtime = { path = "../runtime" }
+log = "0.4.18"
