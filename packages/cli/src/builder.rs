@@ -1,12 +1,8 @@
 use std::{fs::read_to_string, path::PathBuf};
 
-pub fn build(file_name: String, target: Option<String>) {
+pub fn build(file_name: String, target: Option<String>) -> anyhow::Result<()> {
     let target = BuildTarget::from_option_str(target);
     let file_path = PathBuf::from(file_name);
-    if !file_path.is_file() {
-        log::error!("file not found.");
-        return;
-    }
     match target {
         BuildTarget::Html => {
             let ast = dioscript_parser::ast::DioscriptAst::from_string(
@@ -15,10 +11,10 @@ pub fn build(file_name: String, target: Option<String>) {
             match ast {
                 Ok(ast) => {
                     let mut runtime = dioscript_runtime::Runtime::new();
-                    let result = runtime.execute_ast(ast).expect("runtime failed.");
+                    let result = runtime.execute_ast(ast)?;
                     if let dioscript_parser::types::Value::Element(e) = result {
                         let html = "@{dioscript}".replace("@{dioscript}", &e.to_html());
-                        std::fs::write("./examples/output.html", html).expect("write file failed.");
+                        std::fs::write("./output.html", html)?;
                         println!("Done.");
                     }
                 }
@@ -30,6 +26,7 @@ pub fn build(file_name: String, target: Option<String>) {
         BuildTarget::Wasm => todo!(),
         BuildTarget::JavaScript => todo!(),
     }
+    Ok(())
 }
 
 pub enum BuildTarget {
