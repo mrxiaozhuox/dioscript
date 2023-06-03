@@ -20,13 +20,17 @@ enum Commands {
 }
 
 #[derive(Args)]
-struct BuildArgs {
+pub struct BuildArgs {
     /// `.ds` file path
     file: String,
 
     /// build target
     #[arg(long, default_value = "static")]
     target: String,
+
+    /// html template for build
+    #[arg(long)]
+    template: Option<String>,
 
     /// output directory
     #[arg(long, default_value = ".")]
@@ -46,7 +50,7 @@ pub fn main() {
     match &cli.command {
         Commands::Build(args) => {
             let timer = Instant::now();
-            let r = builder::build(&args.file, &args.target, &args.out_dir);
+            let r = builder::build(&args);
             let duration = timer.elapsed();
             match r {
                 Err(e) => {
