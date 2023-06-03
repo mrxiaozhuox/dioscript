@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::types::{AstValue, Value};
+use crate::{
+    parser::CalcExpr,
+    types::{AstValue, Value},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AstElement {
@@ -15,7 +18,7 @@ pub enum AstElementContentType {
     Content(String),
     Condition(crate::ast::ConditionalStatement),
     Loop(crate::ast::LoopStatement),
-    Variable(String),
+    InlineExpr(CalcExpr),
 }
 
 #[derive(Debug, Clone, PartialEq)]

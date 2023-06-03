@@ -78,11 +78,15 @@ impl Runtime {
                     if let AstValue::Boolean(state) = state {
                         if state {
                             result = self.execute_scope(inner_ast, &sub_scope)?;
-                            finish = true;
+                            if !result.as_none() {
+                                finish = true;
+                            }
                         } else {
                             if let Some(otherwise) = otherwise {
                                 result = self.execute_scope(otherwise, &sub_scope)?;
-                                finish = true;
+                                if !result.as_none() {
+                                    finish = true;
+                                }
                             }
                         }
                     } else {
@@ -123,12 +127,18 @@ impl Runtime {
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
                                     self.set_ref(&var, i.clone(), &sub_scope)?;
-                                    self.execute_scope(data.inner.clone(), &sub_scope)?;
+                                    let res = self.execute_scope(data.inner.clone(), &sub_scope)?;
+                                    if !res.as_none() {
+                                        result = res;
+                                        finish = true;
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                _ => {}
             }
         }
         if let AstValue::Element(e) = result {
@@ -380,6 +390,10 @@ impl Runtime {
             if let AstValue::Variable(r) = data {
                 let result = self.get_ref(&r, current_scope)?;
                 attrs.insert(name, result.1.value);
+            } else if let AstValue::VariableIndex((r, i)) = data {
+                let result = self.get_ref(&r, current_scope)?;
+                let result = self.get_from_index(result.1.value, *i)?;
+                attrs.insert(name, result);
             } else {
                 attrs.insert(name, data);
             }
@@ -389,9 +403,7 @@ impl Runtime {
             match i {
                 AstElementContentType::Children(v) => {
                     let executed_element = self.execute_element(v, current_scope)?;
-                    content.push(AstElementContentType::Children(
-                        executed_element,
-                    ));
+                    content.push(AstElementContentType::Children(executed_element));
                 }
                 AstElementContentType::Content(v) => {
                     content.push(AstElementContentType::Content(v));
@@ -420,9 +432,7 @@ impl Runtime {
                             content.push(AstElementContentType::Content(v.clone()));
                         }
                         if let AstValue::Number(v) = &temp {
-                            content.push(AstElementContentType::Content(format!(
-                                "{v}"
-                            )));
+                            content.push(AstElementContentType::Content(format!("{v}")));
                         }
                         if let AstValue::Element(v) = temp {
                             content.push(AstElementContentType::Children(v));
@@ -450,18 +460,13 @@ impl Runtime {
                                     }
                                 }
                                 if let AstValue::String(v) = &temp {
-                                    content.push(AstElementContentType::Content(
-                                        v.clone(),
-                                    ));
+                                    content.push(AstElementContentType::Content(v.clone()));
                                 }
                                 if let AstValue::Number(v) = &temp {
-                                    content.push(AstElementContentType::Content(
-                                        format!("{v}"),
-                                    ));
+                                    content.push(AstElementContentType::Content(format!("{v}")));
                                 }
                                 if let AstValue::Element(v) = temp {
-                                    content
-                                        .push(AstElementContentType::Children(v));
+                                    content.push(AstElementContentType::Children(v));
                                 }
                             }
                         },
@@ -482,38 +487,27 @@ impl Runtime {
                                         }
                                     }
                                     if let AstValue::String(v) = &temp {
-                                        content.push(
-                                            AstElementContentType::Content(
-                                                v.clone(),
-                                            ),
-                                        );
+                                        content.push(AstElementContentType::Content(v.clone()));
                                     }
                                     if let AstValue::Number(v) = &temp {
-                                        content.push(
-                                            AstElementContentType::Content(
-                                                format!("{v}"),
-                                            ),
-                                        );
+                                        content
+                                            .push(AstElementContentType::Content(format!("{v}")));
                                     }
                                     if let AstValue::Element(v) = temp {
-                                        content.push(
-                                            AstElementContentType::Children(v),
-                                        );
+                                        content.push(AstElementContentType::Children(v));
                                     }
                                 }
                             }
                         }
                     }
                 }
-                AstElementContentType::Variable(v) => {
-                    let result = self.get_ref(&v, current_scope)?;
-                    if let AstValue::String(s) = &result.1.value {
+                AstElementContentType::InlineExpr(v) => {
+                    let result = self.execute_calculate(v, current_scope)?;
+                    if let AstValue::String(s) = &result {
                         content.push(AstElementContentType::Content(s.clone()));
                     }
-                    if let AstValue::Number(s) = result.1.value {
-                        content.push(AstElementContentType::Content(format!(
-                            "{s}"
-                        )));
+                    if let AstValue::Number(s) = result {
+                        content.push(AstElementContentType::Content(format!("{s}")));
                     }
                 }
             }

@@ -2,8 +2,10 @@ use std::collections::HashMap;
 
 use nom::{
     branch::alt,
-    bytes::complete::{escaped, tag, tag_no_case, take_till1, take_while1, take_while_m_n},
-    character::complete::{alphanumeric1, char, multispace0, space0, space1},
+    bytes::complete::{
+        escaped, tag, tag_no_case, take_till1, take_until, take_while, take_while1, take_while_m_n,
+    },
+    character::complete::{alpha1, alphanumeric1, char, multispace0, space0, space1},
     combinator::{map, opt, peek, value},
     error::context,
     multi::{fold_many0, many0, separated_list0},
@@ -14,7 +16,7 @@ use nom::{
 
 use crate::{
     ast::{ConditionalStatement, DioAstStatement, LoopStatement},
-    element::{AstElementContentType, AstElement},
+    element::{AstElement, AstElementContentType},
     types::AstValue,
 };
 
@@ -22,7 +24,7 @@ enum AttributeType {
     Attribute((String, AstValue)),
     Content(String),
     Element(AstElement),
-    Variable(String),
+    InlineExpr(CalcExpr),
     Condition(ConditionalStatement),
     Loop(LoopStatement),
 }
@@ -111,7 +113,7 @@ impl TypeParser {
                     tag(","),
                     delimited(multispace0, TypeParser::parse, multispace0),
                 ),
-                tag("]"),
+                delimited(opt(tag(",")), multispace0, tag("]")),
             ),
         )(message)
     }
@@ -119,9 +121,7 @@ impl TypeParser {
     fn variable(message: &str) -> IResult<&str, String> {
         context(
             "variable",
-            map(pair(tag("@"), VariableParser::parse_var_name), |v| {
-                v.1.to_string()
-            }),
+            map(VariableParser::parse_var_name, |v| v.to_string()),
         )(message)
     }
 
@@ -130,7 +130,7 @@ impl TypeParser {
             "variable index",
             map(
                 tuple((
-                    preceded(tag("@"), VariableParser::parse_var_name),
+                    VariableParser::parse_var_name,
                     delimited(tag("["), TypeParser::parse_index_type, tag("]")),
                 )),
                 |v| (v.0.to_string(), Box::new(v.1)),
@@ -159,7 +159,7 @@ impl TypeParser {
                             .collect()
                     },
                 ),
-                tag("}"),
+                delimited(opt(tag(",")), multispace0, tag("}")),
             ),
         )(message)
     }
@@ -200,12 +200,12 @@ impl TypeParser {
                 map(TypeParser::number, AstValue::Number),
                 map(TypeParser::boolean, AstValue::Boolean),
                 map(TypeParser::string, |s| AstValue::String(String::from(s))),
-                map(TypeParser::variable_index, AstValue::VariableIndex),
-                map(TypeParser::variable, AstValue::Variable),
                 map(TypeParser::list, AstValue::List),
                 map(TypeParser::dict, AstValue::Dict),
                 map(TypeParser::tuple, AstValue::Tuple),
                 map(ElementParser::parse, AstValue::Element),
+                map(TypeParser::variable_index, AstValue::VariableIndex),
+                map(TypeParser::variable, AstValue::Variable),
             )),
         )(message)
     }
@@ -213,12 +213,17 @@ impl TypeParser {
 
 struct VariableParser;
 impl VariableParser {
-    fn var_name_style(c: char) -> bool {
-        matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
-    }
-
-    fn parse_var_name(message: &str) -> IResult<&str, &str> {
-        context("var name", take_while1(Self::var_name_style))(message)
+    fn parse_var_name(message: &str) -> IResult<&str, String> {
+        context(
+            "var name",
+            map(
+                pair(
+                    alpha1,
+                    take_while(|c: char| c.is_alphanumeric() || c == '_'),
+                ),
+                |(first, rest): (&str, &str)| format!("{}{}", first, rest).trim().to_string(),
+            ),
+        )(message)
     }
 
     fn parse(message: &str) -> IResult<&str, (String, CalcExpr)> {
@@ -226,11 +231,7 @@ impl VariableParser {
             "variable",
             map(
                 tuple((
-                    delimited(
-                        tag("@"),
-                        Self::parse_var_name,
-                        delimited(space0, tag("="), space0),
-                    ),
+                    terminated(Self::parse_var_name, delimited(space0, tag("="), space0)),
                     CalculateParser::expr,
                     tag(";"),
                 )),
@@ -253,12 +254,43 @@ impl CalculateParser {
         )(input)
     }
 
-    fn term(input: &str) -> IResult<&str, CalcExpr> {
+    fn bool(input: &str) -> IResult<&str, CalcExpr> {
         let (input, init) = Self::factor(input)?;
         delimited(
             space0,
             fold_many0(
-                pair(alt((char('*'), char('/'), char('%'))), Self::factor),
+                pair(
+                    alt((
+                        tag("=="),
+                        tag("!="),
+                        tag(">="),
+                        tag("<="),
+                        tag(">"),
+                        tag("<"),
+                    )),
+                    Self::factor,
+                ),
+                move || init.clone(),
+                |acc, (op, val)| match op {
+                    "==" => CalcExpr::Eq(Box::new(acc), Box::new(val)),
+                    "!=" => CalcExpr::Ne(Box::new(acc), Box::new(val)),
+                    ">=" => CalcExpr::Ge(Box::new(acc), Box::new(val)),
+                    "<=" => CalcExpr::Le(Box::new(acc), Box::new(val)),
+                    ">" => CalcExpr::Gt(Box::new(acc), Box::new(val)),
+                    "<" => CalcExpr::Lt(Box::new(acc), Box::new(val)),
+                    _ => unreachable!(),
+                },
+            ),
+            space0,
+        )(input)
+    }
+
+    fn term(input: &str) -> IResult<&str, CalcExpr> {
+        let (input, init) = Self::bool(input)?;
+        delimited(
+            space0,
+            fold_many0(
+                pair(alt((char('*'), char('/'), char('%'))), Self::bool),
                 move || init.clone(),
                 |acc, (op, val)| match op {
                     '*' => CalcExpr::Mul(Box::new(acc), Box::new(val)),
@@ -401,12 +433,8 @@ impl ElementParser {
                                     |v| AttributeType::Content(v.to_string()),
                                 ),
                                 map(
-                                    delimited(
-                                        multispace0,
-                                        pair(tag("@"), VariableParser::parse_var_name),
-                                        multispace0,
-                                    ),
-                                    |v| AttributeType::Variable(v.1.to_string()),
+                                    delimited(multispace0, CalculateParser::expr, multispace0),
+                                    |v| AttributeType::InlineExpr(v),
                                 ),
                                 map(
                                     delimited(multispace0, StatementParser::parse_if, multispace0),
@@ -443,8 +471,8 @@ impl ElementParser {
                             AttributeType::Element(e) => {
                                 content.push(AstElementContentType::Children(e));
                             }
-                            AttributeType::Variable(s) => {
-                                content.push(AstElementContentType::Variable(s));
+                            AttributeType::InlineExpr(s) => {
+                                content.push(AstElementContentType::InlineExpr(s));
                             }
                             AttributeType::Condition(c) => {
                                 content.push(AstElementContentType::Condition(c));
@@ -466,12 +494,22 @@ impl ElementParser {
     }
 }
 
+fn comment(message: &str) -> IResult<&str, String> {
+    context(
+        "Comment",
+        map(preceded(tag("//"), take_until("\n")), |comment: &str| {
+            comment.trim().to_string()
+        }),
+    )(message)
+}
+
 pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
     context(
         "AST Full",
         many0(delimited(
             multispace0,
             alt((
+                map(comment, |v| DioAstStatement::LineComment(v)),
                 map(VariableParser::parse, |v| {
                     DioAstStatement::VariableAss((v.0.to_string(), v.1.clone()))
                 }),

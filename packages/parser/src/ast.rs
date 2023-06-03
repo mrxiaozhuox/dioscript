@@ -39,6 +39,7 @@ pub enum DioAstStatement {
     ReturnValue(CalcExpr),
     IfStatement(ConditionalStatement),
     LoopStatement(LoopStatement),
+    LineComment(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

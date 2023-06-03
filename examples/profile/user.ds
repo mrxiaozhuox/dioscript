@@ -1,34 +1,10 @@
-// hello world
-@username = "YuKun Liu";
-@email = "mrxzx.info@gmail.com";
+mode = "dark";
 
-@projects = [
-	{
-		"name": "Dioxus",
-		"url": "https://dioxuslabs.com/",	
-	},
-	{
-		"name": "Dorea",
-		"url": "https://dorea.mrxzx.info/",	
-	},
-	{
-		"name": "Karaty",
-		"url": "https://karaty.mrxzx.info/",
-	},
-	{
-		"name": "Dioscript",
-		"url": "https://github.com/mrxiaozhuox/dioscript",
-	}
-];
+style = "text-black bg-white";
+if mode == "dark" {
+  	style = "text-gray-200 bg-gray-800";
+}
 
-return div {
-	class: "flex h-4/6 w-full items-center justify-center container mx-auto px-8 mt-5",
-	div {
-		class: "max-w-2xl text-center",
-		img {
-			class: "rounded-lg w-32",
-			src: "https://avatars.githubusercontent.com/u/41265098?v=4"
-		},
-		h1 { class: "font-bold text-2xl", @username },
-	}
-};
+list = ["Jason", "Jack", "Justin"];
+
+return div { "123" };

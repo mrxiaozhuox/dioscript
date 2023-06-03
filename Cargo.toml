@@ -1,2 +1,6 @@
 [workspace]
-members = ["packages/*"]
+members = [
+  "packages/parser",
+  "packages/runtime",
+  "packages/cli",
+]
