@@ -12,3 +12,4 @@ dioscript-parser = { path = "../parser" }
 dioscript-runtime = { path = "../runtime" }
 
 colored = "2.0.0"
+opener = "0.6.1"

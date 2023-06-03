@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::anyhow;
 
-pub fn build(file_name: &str, target: &str, out_dir: &str) -> anyhow::Result<()> {
+pub fn build(file_name: &str, target: &str, out_dir: &str) -> anyhow::Result<String> {
     let build_target = BuildTarget::from_str(&target);
     let file_path = PathBuf::from(file_name);
     let file_content = read_to_string(&file_path)?;
@@ -21,13 +21,15 @@ pub fn build(file_name: &str, target: &str, out_dir: &str) -> anyhow::Result<()>
                     create_dir_all(out_dir)?;
                 }
                 std::fs::write(format!("{}/{}.html", out_dir, file_stem), html)?;
+                return Ok(format!("{}/{}.html", out_dir, file_stem));
+            } else {
+                return Err(anyhow!("result data type is not Element"));
             }
         }
         BuildTarget::Unknown => {
             return Err(anyhow!("dioscript not support `{target}` builder."));
         }
     }
-    Ok(())
 }
 
 pub enum BuildTarget {
