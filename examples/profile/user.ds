@@ -7,4 +7,9 @@ if mode == "dark" {
 
 list = ["Jason", "Jack", "Justin"];
 
-return div { "123" };
+return div {
+  	class: style,
+	for name in list {
+		return p { "Hello, ", name, "!" };
+	}
+};

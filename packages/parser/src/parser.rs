@@ -433,10 +433,6 @@ impl ElementParser {
                                     |v| AttributeType::Content(v.to_string()),
                                 ),
                                 map(
-                                    delimited(multispace0, CalculateParser::expr, multispace0),
-                                    |v| AttributeType::InlineExpr(v),
-                                ),
-                                map(
                                     delimited(multispace0, StatementParser::parse_if, multispace0),
                                     |v| AttributeType::Condition(v),
                                 ),
@@ -451,6 +447,10 @@ impl ElementParser {
                                         multispace0,
                                     ),
                                     |v| AttributeType::Loop(v),
+                                ),
+                                map(
+                                    delimited(multispace0, CalculateParser::expr, multispace0),
+                                    |v| AttributeType::InlineExpr(v),
                                 ),
                             )),
                         ),
