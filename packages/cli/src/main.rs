@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use colored::*;
 
 mod builder;
 
@@ -18,18 +19,28 @@ enum Commands {
 
 #[derive(Args)]
 struct BuildArgs {
+    /// `.ds` file path
     file: String,
-    #[arg(long)]
-    target: Option<String>,
+
+    /// build target
+    #[arg(long, default_value = "static")]
+    target: String,
+
+    /// output directory
+    #[arg(long, default_value = ".")]
+    out_dir: String,
 }
 
 pub fn main() {
     let cli = Dsc::parse();
     match &cli.command {
         Commands::Build(args) => {
-            let target = args.target.clone();
-            let file_name = args.file.clone();
-            builder::build(file_name, target);
+            let r = builder::build(&args.file, &args.target, &args.out_dir);
+            if let Err(e) = r {
+                println!("{}", e.to_string().red().bold());
+            } else {
+                println!("{}", "Build finished.".blue().bold());
+            }
         }
     }
 }
