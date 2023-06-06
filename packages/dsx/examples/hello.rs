@@ -8,7 +8,9 @@ fn main() {
 fn App(cx: Scope) -> Element {
     cx.render(rsx! {
         div {
-            View {}
+            View {
+                code: "return a {{ href: \"https://github.com/mrxiaozhuox\", \"Hello World\" }}".to_string(),
+            }
         }
     })
 }
