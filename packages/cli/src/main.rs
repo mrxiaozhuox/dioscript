@@ -1,4 +1,4 @@
-use std::{fmt::write, fs::File, io::Write, path::PathBuf, time::Instant};
+use std::{fs::File, io::Write, path::PathBuf, time::Instant};
 
 use clap::{Args, Parser, Subcommand};
 use colored::*;
@@ -86,7 +86,7 @@ pub fn main() {
                 }
             }
         }
-        Commands::Playground(args) => {
+        Commands::Playground(_args) => {
             println!("\n{}", "Welcome to `Dioscript` playground!".blue().bold());
             println!(
                 "{}",

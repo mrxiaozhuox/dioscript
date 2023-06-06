@@ -4,7 +4,7 @@ use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use dioscript_parser::{
     ast::{CalculateMark, DioAstStatement, DioscriptAst, LoopExecuteType},
-    element::{AstElement, AstElementContentType},
+    element::{AstElement, AstElementContentType, Element, ElementContentType},
     error::{Error, RuntimeError},
     parser::CalcExpr,
     types::{AstValue, Value},
@@ -40,15 +40,15 @@ impl Runtime {
     pub fn execute_ast(&mut self, ast: DioscriptAst) -> Result<Value, RuntimeError> {
         let root_id = self.root_scope.clone();
         let result = self.execute_scope(ast.stats, &root_id)?;
-        Ok(Value::from_ast_value(result))
+        Ok(result)
     }
 
     pub fn execute_scope(
         &mut self,
         statements: Vec<DioAstStatement>,
         current_scope: &NodeId,
-    ) -> Result<AstValue, RuntimeError> {
-        let mut result: AstValue = AstValue::None;
+    ) -> Result<Value, RuntimeError> {
+        let mut result: Value = Value::None;
         let mut finish = false;
         for v in statements {
             if finish {
@@ -75,7 +75,7 @@ impl Runtime {
                     let inner_ast = cond.inner.clone();
                     let otherwise = cond.otherwise.clone();
                     let state = self.execute_calculate(condition_expr, current_scope)?;
-                    if let AstValue::Boolean(state) = state {
+                    if let Value::Boolean(state) = state {
                         if state {
                             result = self.execute_scope(inner_ast, &sub_scope)?;
                             if !result.as_none() {
@@ -117,13 +117,8 @@ impl Runtime {
                                 }
                             }
                         },
-                        LoopExecuteType::Iter { mut iter, var } => {
-                            if iter.value_name() == "variable" {
-                                iter = self
-                                    .get_ref(&iter.as_variable().unwrap(), current_scope)?
-                                    .1
-                                    .value;
-                            }
+                        LoopExecuteType::Iter { iter, var } => {
+                            let iter = self.to_value(iter, current_scope)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
                                     self.set_ref(&var, i.clone(), &sub_scope)?;
@@ -141,30 +136,59 @@ impl Runtime {
                 _ => {}
             }
         }
-        if let AstValue::Element(e) = result {
-            result = AstValue::Element(self.execute_element(e, current_scope)?);
+        Ok(result)
+    }
+
+    fn to_value(&mut self, value: AstValue, current_scope: &NodeId) -> Result<Value, RuntimeError> {
+        match value {
+            AstValue::None => Ok(Value::None),
+            AstValue::String(v) => Ok(Value::String(v)),
+            AstValue::Number(v) => Ok(Value::Number(v)),
+            AstValue::Boolean(v) => Ok(Value::Boolean(v)),
+            AstValue::List(v) => {
+                let mut res = Vec::new();
+                for i in v {
+                    let value = self.to_value(i, current_scope)?;
+                    res.push(value);
+                }
+                Ok(Value::List(res))
+            }
+            AstValue::Dict(v) => {
+                let mut res = HashMap::new();
+                for (k, v) in v {
+                    res.insert(k, self.to_value(v, current_scope)?);
+                }
+                Ok(Value::Dict(res))
+            }
+            AstValue::Tuple((a, b)) => {
+                let a = self.to_value(*a, current_scope)?;
+                let b = self.to_value(*b, current_scope)?;
+                Ok(Value::Tuple((Box::new(a), Box::new(b))))
+            }
+            AstValue::Element(e) => {
+                let element = self.execute_element(e, current_scope)?;
+                Ok(Value::Element(element))
+            }
+            AstValue::Variable(n) => {
+                let value = self.get_ref(&n, current_scope)?;
+                Ok(value.1.value)
+            }
+            AstValue::VariableIndex((n, i)) => {
+                let value = self.to_value(AstValue::Variable(n), current_scope)?;
+                let index = self.to_value(*i, current_scope)?;
+                let data = self.get_from_index(value, index)?;
+                Ok(data)
+            }
         }
-        return Ok(result);
     }
 
     fn execute_calculate(
-        &self,
+        &mut self,
         expr: CalcExpr,
         current_scope: &NodeId,
-    ) -> Result<AstValue, RuntimeError> {
+    ) -> Result<Value, RuntimeError> {
         match expr {
-            CalcExpr::Value(v) => {
-                if let AstValue::Variable(v) = v {
-                    let data = self.get_ref(&v, current_scope)?;
-                    Ok(data.1.value.clone())
-                } else if let AstValue::VariableIndex((name, index)) = v {
-                    let temp = self.get_ref(&name, current_scope)?;
-                    let data = self.get_from_index(temp.1.value, *index.clone())?;
-                    Ok(data)
-                } else {
-                    Ok(v)
-                }
-            }
+            CalcExpr::Value(v) => Ok(self.to_value(v, current_scope)?),
             CalcExpr::Add(l, r) => {
                 let l = self.execute_calculate(*l, current_scope)?;
                 let r = self.execute_calculate(*r, current_scope)?;
@@ -185,7 +209,7 @@ impl Runtime {
                 let r = self.execute_calculate(*r, current_scope)?;
                 l.calc(&r, CalculateMark::Divide)
             }
-            CalcExpr::Mod(_, _) => Ok(AstValue::Boolean(false)),
+            CalcExpr::Mod(_, _) => Ok(Value::Boolean(false)),
             CalcExpr::Eq(l, r) => {
                 let l = self.execute_calculate(*l, current_scope)?;
                 let r = self.execute_calculate(*r, current_scope)?;
@@ -266,16 +290,9 @@ impl Runtime {
     fn set_ref(
         &mut self,
         name: &str,
-        value: AstValue,
+        value: Value,
         current_scope: &NodeId,
     ) -> Result<NodeId, RuntimeError> {
-        let mut value = value;
-
-        // handle element data type
-        if let AstValue::Element(element) = &value {
-            value = AstValue::Element(self.execute_element(element.clone(), current_scope)?);
-        }
-
         if let Some(scope) = self.vars.get(name) {
             let vars = self.scope.get_mut(scope)?.data_mut();
             if let ScopeType::Variable(v) = vars {
@@ -293,15 +310,15 @@ impl Runtime {
         }
     }
 
-    fn get_from_index(&self, value: AstValue, index: AstValue) -> Result<AstValue, RuntimeError> {
+    fn get_from_index(&self, value: Value, index: Value) -> Result<Value, RuntimeError> {
         match &value {
-            AstValue::String(v) => {
-                if let AstValue::Number(num) = index {
+            Value::String(v) => {
+                if let Value::Number(num) = index {
                     let num = num as usize;
                     let chars = v.chars();
                     let c = chars.collect::<Vec<char>>();
                     if c.len() >= num + 1 {
-                        return Ok(AstValue::String(c[num].to_string()));
+                        return Ok(Value::String(c[num].to_string()));
                     } else {
                         Err(RuntimeError::IndexNotFound {
                             index: index.value_name(),
@@ -315,8 +332,8 @@ impl Runtime {
                     })
                 }
             }
-            AstValue::List(v) => {
-                if let AstValue::Number(num) = index {
+            Value::List(v) => {
+                if let Value::Number(num) = index {
                     let num = num as usize;
                     if v.len() >= num + 1 {
                         let v = v[num].clone();
@@ -334,8 +351,8 @@ impl Runtime {
                     })
                 }
             }
-            AstValue::Dict(v) => {
-                if let AstValue::String(key) = &index {
+            Value::Dict(v) => {
+                if let Value::String(key) = &index {
                     if let Some(value) = v.get(key) {
                         Ok(value.clone())
                     } else {
@@ -351,8 +368,8 @@ impl Runtime {
                     })
                 }
             }
-            AstValue::Tuple(v) => {
-                if let AstValue::Number(num) = index {
+            Value::Tuple(v) => {
+                if let Value::Number(num) = index {
                     let num = num as usize;
                     if num == 0 {
                         Ok(*v.0.clone())
@@ -382,31 +399,22 @@ impl Runtime {
         &mut self,
         element: AstElement,
         current_scope: &NodeId,
-    ) -> Result<AstElement, RuntimeError> {
+    ) -> Result<Element, RuntimeError> {
         let mut attrs = HashMap::new();
         for i in element.attributes {
             let name = i.0;
             let data = i.1;
-            if let AstValue::Variable(r) = data {
-                let result = self.get_ref(&r, current_scope)?;
-                attrs.insert(name, result.1.value);
-            } else if let AstValue::VariableIndex((r, i)) = data {
-                let result = self.get_ref(&r, current_scope)?;
-                let result = self.get_from_index(result.1.value, *i)?;
-                attrs.insert(name, result);
-            } else {
-                attrs.insert(name, data);
-            }
+            attrs.insert(name, self.to_value(data, current_scope)?);
         }
         let mut content = vec![];
         for i in element.content {
             match i {
                 AstElementContentType::Children(v) => {
                     let executed_element = self.execute_element(v, current_scope)?;
-                    content.push(AstElementContentType::Children(executed_element));
+                    content.push(ElementContentType::Children(executed_element));
                 }
                 AstElementContentType::Content(v) => {
-                    content.push(AstElementContentType::Content(v));
+                    content.push(ElementContentType::Content(v));
                 }
                 AstElementContentType::Condition(v) => {
                     let value = self.execute_calculate(v.condition, current_scope)?;
@@ -414,8 +422,8 @@ impl Runtime {
                         Node::new(ScopeType::Block),
                         id_tree::InsertBehavior::UnderNode(current_scope),
                     )?;
-                    if let AstValue::Boolean(b) = value {
-                        let mut temp = AstValue::None;
+                    if let Value::Boolean(b) = value {
+                        let mut temp = Value::None;
                         if b {
                             temp = self.execute_scope(v.inner, &sub_scope)?;
                         } else {
@@ -423,19 +431,19 @@ impl Runtime {
                                 temp = self.execute_scope(otherwise, &sub_scope)?;
                             }
                         }
-                        if let AstValue::Tuple((k, v)) = &temp {
-                            if let AstValue::String(k) = *k.clone() {
+                        if let Value::Tuple((k, v)) = &temp {
+                            if let Value::String(k) = *k.clone() {
                                 attrs.insert(k.to_string(), *v.clone());
                             }
                         }
-                        if let AstValue::String(v) = &temp {
-                            content.push(AstElementContentType::Content(v.clone()));
+                        if let Value::String(v) = &temp {
+                            content.push(ElementContentType::Content(v.clone()));
                         }
-                        if let AstValue::Number(v) = &temp {
-                            content.push(AstElementContentType::Content(format!("{v}")));
+                        if let Value::Number(v) = &temp {
+                            content.push(ElementContentType::Content(format!("{v}")));
                         }
-                        if let AstValue::Element(v) = temp {
-                            content.push(AstElementContentType::Children(v));
+                        if let Value::Element(v) = temp {
+                            content.push(ElementContentType::Children(v));
                         }
                     }
                 }
@@ -454,47 +462,41 @@ impl Runtime {
                                 break;
                             } else {
                                 let temp = self.execute_scope(v.inner.clone(), &sub_scope)?;
-                                if let AstValue::Tuple((k, v)) = &temp {
-                                    if let AstValue::String(k) = *k.clone() {
+                                if let Value::Tuple((k, v)) = &temp {
+                                    if let Value::String(k) = *k.clone() {
                                         attrs.insert(k.to_string(), *v.clone());
                                     }
                                 }
-                                if let AstValue::String(v) = &temp {
-                                    content.push(AstElementContentType::Content(v.clone()));
+                                if let Value::String(v) = &temp {
+                                    content.push(ElementContentType::Content(v.clone()));
                                 }
-                                if let AstValue::Number(v) = &temp {
-                                    content.push(AstElementContentType::Content(format!("{v}")));
+                                if let Value::Number(v) = &temp {
+                                    content.push(ElementContentType::Content(format!("{v}")));
                                 }
-                                if let AstValue::Element(v) = temp {
-                                    content.push(AstElementContentType::Children(v));
+                                if let Value::Element(v) = temp {
+                                    content.push(ElementContentType::Children(v));
                                 }
                             }
                         },
-                        LoopExecuteType::Iter { mut iter, var } => {
-                            if iter.value_name() == "variable" {
-                                iter = self
-                                    .get_ref(&iter.as_variable().unwrap(), current_scope)?
-                                    .1
-                                    .value;
-                            }
+                        LoopExecuteType::Iter { iter, var } => {
+                            let iter = self.to_value(iter, current_scope)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
                                     self.set_ref(&var, i.clone(), &sub_scope)?;
                                     let temp = self.execute_scope(v.inner.clone(), &sub_scope)?;
-                                    if let AstValue::Tuple((k, v)) = &temp {
-                                        if let AstValue::String(k) = *k.clone() {
+                                    if let Value::Tuple((k, v)) = &temp {
+                                        if let Value::String(k) = *k.clone() {
                                             attrs.insert(k.to_string(), *v.clone());
                                         }
                                     }
-                                    if let AstValue::String(v) = &temp {
-                                        content.push(AstElementContentType::Content(v.clone()));
+                                    if let Value::String(v) = &temp {
+                                        content.push(ElementContentType::Content(v.clone()));
                                     }
-                                    if let AstValue::Number(v) = &temp {
-                                        content
-                                            .push(AstElementContentType::Content(format!("{v}")));
+                                    if let Value::Number(v) = &temp {
+                                        content.push(ElementContentType::Content(format!("{v}")));
                                     }
-                                    if let AstValue::Element(v) = temp {
-                                        content.push(AstElementContentType::Children(v));
+                                    if let Value::Element(v) = temp {
+                                        content.push(ElementContentType::Children(v));
                                     }
                                 }
                             }
@@ -503,16 +505,16 @@ impl Runtime {
                 }
                 AstElementContentType::InlineExpr(v) => {
                     let result = self.execute_calculate(v, current_scope)?;
-                    if let AstValue::String(s) = &result {
-                        content.push(AstElementContentType::Content(s.clone()));
+                    if let Value::String(s) = &result {
+                        content.push(ElementContentType::Content(s.clone()));
                     }
-                    if let AstValue::Number(s) = result {
-                        content.push(AstElementContentType::Content(format!("{s}")));
+                    if let Value::Number(s) = result {
+                        content.push(ElementContentType::Content(format!("{s}")));
                     }
                 }
             }
         }
-        Ok(AstElement {
+        Ok(Element {
             name: element.name,
             attributes: attrs,
             content,
@@ -537,6 +539,6 @@ impl ScopeType {
 
 #[derive(Debug, Clone)]
 pub struct Variable {
-    pub value: AstValue,
+    pub value: Value,
     pub counter: u32,
 }
