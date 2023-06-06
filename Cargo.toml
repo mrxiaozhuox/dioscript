@@ -3,4 +3,5 @@ members = [
   "packages/parser",
   "packages/runtime",
   "packages/cli",
+  "packages/dsx",
 ]
