@@ -35,35 +35,6 @@ pub enum ElementContentType {
 }
 
 impl Element {
-    pub fn from_ast_element(from: AstElement) -> Self {
-        let mut this = Self {
-            name: String::new(),
-            attributes: HashMap::new(),
-            content: vec![],
-        };
-
-        this.name = from.name;
-
-        for (k, v) in from.attributes {
-            this.attributes.insert(k, Value::from_ast_value(v));
-        }
-
-        for i in from.content {
-            match i {
-                AstElementContentType::Children(v) => {
-                    this.content
-                        .push(ElementContentType::Children(Element::from_ast_element(v)));
-                }
-                AstElementContentType::Content(v) => {
-                    this.content.push(ElementContentType::Content(v));
-                }
-                _ => {}
-            }
-        }
-
-        this
-    }
-
     pub fn to_html(&self) -> String {
         let mut attr_str = String::new();
         for (name, value) in &self.attributes {

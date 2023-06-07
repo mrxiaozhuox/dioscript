@@ -15,7 +15,7 @@ use nom::{
 };
 
 use crate::{
-    ast::{ConditionalStatement, DioAstStatement, LoopStatement},
+    ast::{ConditionalStatement, DioAstStatement, FunctionDefine, LoopStatement, ParamsType},
     element::{AstElement, AstElementContentType},
     types::AstValue,
 };
@@ -204,6 +204,9 @@ impl TypeParser {
                 map(TypeParser::dict, AstValue::Dict),
                 map(TypeParser::tuple, AstValue::Tuple),
                 map(ElementParser::parse, AstValue::Element),
+                map(FunctionParser::call, |(n, p)| {
+                    AstValue::FunctionCaller(n, p)
+                }),
                 map(TypeParser::variable_index, AstValue::VariableIndex),
                 map(TypeParser::variable, AstValue::Variable),
             )),
@@ -318,6 +321,72 @@ impl CalculateParser {
             ),
             space0,
         )(input)
+    }
+}
+
+struct FunctionParser;
+impl FunctionParser {
+    fn parse_function_name(message: &str) -> IResult<&str, String> {
+        context(
+            "function name",
+            map(
+                pair(
+                    alpha1,
+                    take_while(|c: char| c.is_alphanumeric() || c == '_'),
+                ),
+                |(first, rest): (&str, &str)| format!("{}{}", first, rest).trim().to_string(),
+            ),
+        )(message)
+    }
+
+    fn call(message: &str) -> IResult<&str, (String, Vec<AstValue>)> {
+        context(
+            "function call",
+            map(
+                tuple((
+                    terminated(Self::parse_function_name, tag("(")),
+                    delimited(
+                        space0,
+                        separated_list0(tag(","), delimited(space0, TypeParser::parse, space0)),
+                        space0,
+                    ),
+                    tag(")"),
+                )),
+                |(name, params, _)| (name, params),
+            ),
+        )(message)
+    }
+
+    fn define(message: &str) -> IResult<&str, FunctionDefine> {
+        context(
+            "function define",
+            map(
+                tuple((
+                    pair(tag("fn"), space1),
+                    opt(terminated(Self::parse_function_name, space0)),
+                    delimited(
+                        tag("("),
+                        alt((
+                            map(tag("..."), |_| ParamsType::Variable),
+                            map(
+                                separated_list0(
+                                    tag(","),
+                                    delimited(space0, Self::parse_function_name, space0),
+                                ),
+                                |v| ParamsType::List(v),
+                            ),
+                        )),
+                        delimited(tag(")"), space0, tag("{")),
+                    ),
+                    delimited(multispace0, parse_rsx, pair(multispace0, tag("}"))),
+                )),
+                |(_, name, params, inner)| FunctionDefine {
+                    name,
+                    params,
+                    inner,
+                },
+            ),
+        )(message)
     }
 }
 

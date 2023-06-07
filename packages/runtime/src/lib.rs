@@ -3,12 +3,14 @@ use std::collections::HashMap;
 use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use dioscript_parser::{
-    ast::{CalculateMark, DioAstStatement, DioscriptAst, LoopExecuteType},
+    ast::{CalculateMark, DioAstStatement, DioscriptAst, FunctionDefine, LoopExecuteType},
     element::{AstElement, AstElementContentType, Element, ElementContentType},
     error::{Error, RuntimeError},
     parser::CalcExpr,
     types::{AstValue, Value},
 };
+
+pub mod function;
 
 pub struct Runtime {
     // variable content: use for save variable node-id.
@@ -17,6 +19,8 @@ pub struct Runtime {
     scope: Tree<ScopeType>,
     // root scope: root tree id.
     root_scope: NodeId,
+    // functions content: use for save function node-id.
+    functions: HashMap<String, NodeId>,
 }
 
 impl Runtime {
@@ -29,7 +33,21 @@ impl Runtime {
             vars: HashMap::new(),
             scope,
             root_scope: root,
+            functions: HashMap::new(),
         }
+    }
+
+    pub fn add_function(
+        &mut self,
+        name: &str,
+        func: function::Function,
+    ) -> Result<NodeId, RuntimeError> {
+        let new_scope = self.scope.insert(
+            Node::new(ScopeType::Function(FunctionType::RSF(func))),
+            id_tree::InsertBehavior::UnderNode(&self.root_scope),
+        )?;
+        self.functions.insert(name.to_string(), new_scope.clone());
+        Ok(new_scope)
     }
 
     pub fn execute(&mut self, code: &str) -> Result<Value, Error> {
@@ -179,7 +197,57 @@ impl Runtime {
                 let data = self.get_from_index(value, index)?;
                 Ok(data)
             }
+            AstValue::FunctionCaller(n, p) => {
+                let data = self.execute_function(&n, p, current_scope)?;
+                Ok(data)
+            }
+            _ => Ok(Value::None),
         }
+    }
+
+    fn execute_function(
+        &mut self,
+        name: &str,
+        params: Vec<AstValue>,
+        current_scope: &NodeId,
+    ) -> Result<Value, RuntimeError> {
+        let mut par = vec![];
+        for i in params {
+            let v = self.to_value(i, current_scope)?;
+            par.push(v);
+        }
+        if let Some(ref_scope) = self.functions.get(name) {
+            if let Ok(ref_node) = self.scope.get(ref_scope) {
+                let mut flag = false;
+                let ref_node_id = ref_node.parent().unwrap();
+                let mut curr_node_id = current_scope;
+
+                loop {
+                    if curr_node_id == ref_node_id {
+                        flag = true;
+                        break;
+                    }
+                    if let Some(v) = self.scope.get(curr_node_id)?.parent() {
+                        curr_node_id = v;
+                    } else {
+                        break;
+                    }
+                }
+                if flag {
+                    if let ScopeType::Function(v) = ref_node.data() {
+                        match v {
+                            FunctionType::DSF(_) => return Ok(Value::None),
+                            FunctionType::RSF(f) => {
+                                return Ok(f(par));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(RuntimeError::VariableNotFound {
+            name: name.to_string(),
+        })
     }
 
     fn execute_calculate(
@@ -522,10 +590,15 @@ impl Runtime {
     }
 }
 
-#[derive(Debug, Clone)]
 pub enum ScopeType {
     Block,
     Variable(Variable),
+    Function(FunctionType),
+}
+
+pub enum FunctionType {
+    DSF(FunctionDefine),
+    RSF(function::Function),
 }
 
 impl ScopeType {

@@ -105,6 +105,12 @@ pub fn main() {
                     match ast {
                         Ok(ast) => {
                             let mut runtime = dioscript_runtime::Runtime::new();
+                            let _ = runtime
+                                .add_function(
+                                    "to_html",
+                                    dioscript_runtime::function::element_to_html(),
+                                )
+                                .unwrap();
                             let result = runtime.execute_ast(ast);
                             match result {
                                 Ok(r) => {

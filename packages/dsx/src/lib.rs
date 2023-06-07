@@ -1,6 +1,7 @@
 use dioscript_parser::types::Value;
 use dioxus::prelude::*;
 
+#[allow(non_snake_case)]
 #[inline_props]
 pub fn View(cx: Scope, code: String) -> Element {
     let mut rt = dioscript_runtime::Runtime::new();

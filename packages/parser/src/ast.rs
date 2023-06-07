@@ -42,6 +42,19 @@ pub enum DioAstStatement {
     LineComment(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct FunctionDefine {
+    pub name: Option<String>,
+    pub params: ParamsType,
+    pub inner: Vec<DioAstStatement>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ParamsType {
+    Variable,
+    List(Vec<String>),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConditionalStatement {
     pub condition: CalcExpr,

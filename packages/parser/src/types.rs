@@ -18,6 +18,7 @@ pub enum AstValue {
     Element(AstElement),
     Variable(String),
     VariableIndex((String, Box<AstValue>)),
+    FunctionCaller(String, Vec<AstValue>),
 }
 
 impl AstValue {
@@ -33,6 +34,7 @@ impl AstValue {
             AstValue::Element(_) => "element",
             AstValue::Variable(_) => "variable",
             AstValue::VariableIndex(_) => "variable[index]",
+            AstValue::FunctionCaller(_, _) => "call[func]",
         }
         .to_string()
     }
@@ -218,33 +220,6 @@ impl Value {
         }
     }
 
-    pub fn from_ast_value(from: AstValue) -> Self {
-        match from {
-            AstValue::None => Value::None,
-            AstValue::String(v) => Value::String(v),
-            AstValue::Number(v) => Value::Number(v),
-            AstValue::Boolean(v) => Value::Boolean(v),
-            AstValue::List(v) => Value::List(
-                v.iter()
-                    .map(|i| Value::from_ast_value(i.clone()))
-                    .collect::<Vec<Value>>(),
-            ),
-            AstValue::Dict(v) => {
-                let mut r = HashMap::new();
-                for (k, d) in v {
-                    r.insert(k, Value::from_ast_value(d));
-                }
-                Value::Dict(r)
-            }
-            AstValue::Tuple(v) => Value::Tuple((
-                Box::new(Value::from_ast_value(*v.0)),
-                Box::new(Value::from_ast_value(*v.1)),
-            )),
-            AstValue::Element(v) => Value::Element(Element::from_ast_element(v)),
-            AstValue::Variable(_) => Value::None,
-            AstValue::VariableIndex(_) => Value::None,
-        }
-    }
     pub fn calc(&self, o: &Value, s: CalculateMark) -> Result<Value, RuntimeError> {
         if self.value_name() != o.value_name() {
             return Err(RuntimeError::CompareDiffType {
