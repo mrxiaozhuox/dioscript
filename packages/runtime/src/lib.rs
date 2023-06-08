@@ -3,14 +3,18 @@ use std::collections::HashMap;
 use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use dioscript_parser::{
-    ast::{CalculateMark, DioAstStatement, DioscriptAst, FunctionDefine, LoopExecuteType},
+    ast::{
+        CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine, LoopExecuteType,
+    },
     element::{AstElement, AstElementContentType, Element, ElementContentType},
     error::{Error, RuntimeError},
     parser::CalcExpr,
     types::{AstValue, Value},
 };
+use stdlib::Exporter;
 
 pub mod function;
+pub mod stdlib;
 
 pub struct Runtime {
     // variable content: use for save variable node-id.
@@ -29,24 +33,50 @@ impl Runtime {
         let root = scope
             .insert(Node::new(ScopeType::Block), id_tree::InsertBehavior::AsRoot)
             .expect("Scope init failed.");
-        Self {
+
+        let mut this = Self {
             vars: HashMap::new(),
             scope,
             root_scope: root,
             functions: HashMap::new(),
+        };
+
+        this.add_function_list(crate::stdlib::value::export())
+            .unwrap();
+        this.add_function_list(crate::stdlib::console::export())
+            .unwrap();
+        this.add_function_list(crate::stdlib::root_export())
+            .unwrap();
+
+        this
+    }
+
+    pub fn add_function_list(&mut self, list: Exporter) -> Result<(), RuntimeError> {
+        let namespace = list.0.clone();
+        for (name, (function, param_num)) in list.1 {
+            self.add_function(namespace.clone(), &name, function, param_num)?;
         }
+        Ok(())
     }
 
     pub fn add_function(
         &mut self,
+        namespace: Vec<String>,
         name: &str,
         func: function::Function,
+        param_number: i16,
     ) -> Result<NodeId, RuntimeError> {
+        let full_name = if namespace.is_empty() {
+            name.to_string()
+        } else {
+            format!("{0}::{name}", namespace.join("::"))
+        };
         let new_scope = self.scope.insert(
-            Node::new(ScopeType::Function(FunctionType::RSF(func))),
+            Node::new(ScopeType::Function(FunctionType::RSF((func, param_number)))),
             id_tree::InsertBehavior::UnderNode(&self.root_scope),
         )?;
-        self.functions.insert(name.to_string(), new_scope.clone());
+        self.functions
+            .insert(full_name.to_string(), new_scope.clone());
         Ok(new_scope)
     }
 
@@ -151,6 +181,9 @@ impl Runtime {
                         }
                     }
                 }
+                DioAstStatement::FunctionCall(func) => {
+                    let _result = self.execute_function(func, current_scope)?;
+                }
                 _ => {}
             }
         }
@@ -197,26 +230,30 @@ impl Runtime {
                 let data = self.get_from_index(value, index)?;
                 Ok(data)
             }
-            AstValue::FunctionCaller(n, p) => {
-                let data = self.execute_function(&n, p, current_scope)?;
+            AstValue::FunctionCaller(caller) => {
+                let data = self.execute_function(caller, current_scope)?;
                 Ok(data)
             }
-            _ => Ok(Value::None),
         }
     }
 
     fn execute_function(
         &mut self,
-        name: &str,
-        params: Vec<AstValue>,
+        caller: FunctionCall,
         current_scope: &NodeId,
     ) -> Result<Value, RuntimeError> {
+        let name = if caller.namespace.is_empty() {
+            caller.name.to_string()
+        } else {
+            format!("{}::{}", caller.namespace.join("::"), caller.name.clone())
+        };
+        let params = caller.arguments;
         let mut par = vec![];
         for i in params {
             let v = self.to_value(i, current_scope)?;
             par.push(v);
         }
-        if let Some(ref_scope) = self.functions.get(name) {
+        if let Some(ref_scope) = self.functions.get(&name) {
             if let Ok(ref_node) = self.scope.get(ref_scope) {
                 let mut flag = false;
                 let ref_node_id = ref_node.parent().unwrap();
@@ -237,7 +274,13 @@ impl Runtime {
                     if let ScopeType::Function(v) = ref_node.data() {
                         match v {
                             FunctionType::DSF(_) => return Ok(Value::None),
-                            FunctionType::RSF(f) => {
+                            FunctionType::RSF((f, need_param_num)) => {
+                                if *need_param_num != -1 && (par.len() as i16) != *need_param_num {
+                                    return Err(RuntimeError::IllegalArgumentsNumber {
+                                        need: *need_param_num,
+                                        provided: par.len() as i16,
+                                    });
+                                }
                                 return Ok(f(par));
                             }
                         }
@@ -598,7 +641,7 @@ pub enum ScopeType {
 
 pub enum FunctionType {
     DSF(FunctionDefine),
-    RSF(function::Function),
+    RSF((function::Function, i16)),
 }
 
 impl ScopeType {

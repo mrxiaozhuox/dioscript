@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::CalculateMark,
+    ast::{CalculateMark, FunctionCall},
     element::{AstElement, Element},
     error::RuntimeError,
 };
@@ -18,7 +18,7 @@ pub enum AstValue {
     Element(AstElement),
     Variable(String),
     VariableIndex((String, Box<AstValue>)),
-    FunctionCaller(String, Vec<AstValue>),
+    FunctionCaller(FunctionCall),
 }
 
 impl AstValue {
@@ -34,7 +34,7 @@ impl AstValue {
             AstValue::Element(_) => "element",
             AstValue::Variable(_) => "variable",
             AstValue::VariableIndex(_) => "variable[index]",
-            AstValue::FunctionCaller(_, _) => "call[func]",
+            AstValue::FunctionCaller(_) => "call[func]",
         }
         .to_string()
     }
@@ -122,6 +122,21 @@ pub enum Value {
     Dict(HashMap<String, Value>),
     Tuple((Box<Value>, Box<Value>)),
     Element(Element),
+}
+
+impl ToString for Value {
+    fn to_string(&self) -> String {
+        match self {
+            Value::None => "none".to_string(),
+            Value::String(v) => v.clone(),
+            Value::Number(v) => v.to_string(),
+            Value::Boolean(v) => v.to_string(),
+            Value::List(_) => "[ list ]".to_string(),
+            Value::Dict(_) => "{ dict }".to_string(),
+            Value::Tuple(_) => "( tuple )".to_string(),
+            Value::Element(_) => "{ element }".to_string(),
+        }
+    }
 }
 
 impl Value {

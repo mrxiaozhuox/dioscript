@@ -8,14 +8,17 @@ use nom::{
     character::complete::{alpha1, alphanumeric1, char, multispace0, space0, space1},
     combinator::{map, opt, peek, value},
     error::context,
-    multi::{fold_many0, many0, separated_list0},
+    multi::{fold_many0, many0, separated_list0, separated_list1},
     number::complete::double,
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
 
 use crate::{
-    ast::{ConditionalStatement, DioAstStatement, FunctionDefine, LoopStatement, ParamsType},
+    ast::{
+        ConditionalStatement, DioAstStatement, FunctionCall, FunctionDefine, LoopStatement,
+        ParamsType,
+    },
     element::{AstElement, AstElementContentType},
     types::AstValue,
 };
@@ -204,9 +207,7 @@ impl TypeParser {
                 map(TypeParser::dict, AstValue::Dict),
                 map(TypeParser::tuple, AstValue::Tuple),
                 map(ElementParser::parse, AstValue::Element),
-                map(FunctionParser::call, |(n, p)| {
-                    AstValue::FunctionCaller(n, p)
-                }),
+                map(FunctionParser::call, AstValue::FunctionCaller),
                 map(TypeParser::variable_index, AstValue::VariableIndex),
                 map(TypeParser::variable, AstValue::Variable),
             )),
@@ -339,12 +340,15 @@ impl FunctionParser {
         )(message)
     }
 
-    fn call(message: &str) -> IResult<&str, (String, Vec<AstValue>)> {
+    fn call(message: &str) -> IResult<&str, FunctionCall> {
         context(
             "function call",
             map(
                 tuple((
-                    terminated(Self::parse_function_name, tag("(")),
+                    terminated(
+                        separated_list1(tag("::"), Self::parse_function_name),
+                        tag("("),
+                    ),
                     delimited(
                         space0,
                         separated_list0(tag(","), delimited(space0, TypeParser::parse, space0)),
@@ -352,7 +356,15 @@ impl FunctionParser {
                     ),
                     tag(")"),
                 )),
-                |(name, params, _)| (name, params),
+                |(mut namespace, arguments, _)| {
+                    let name = namespace.last().unwrap().clone();
+                    namespace.remove(namespace.len() - 1);
+                    FunctionCall {
+                        namespace,
+                        name,
+                        arguments,
+                    }
+                },
             ),
         )(message)
     }
@@ -585,6 +597,10 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
                 map(
                     delimited(tag("return "), CalculateParser::expr, tag(";")),
                     |v| DioAstStatement::ReturnValue(v),
+                ),
+                map(
+                    terminated(FunctionParser::call, pair(space0, tag(";"))),
+                    |v| DioAstStatement::FunctionCall(v),
                 ),
                 map(StatementParser::parse_if, |v| {
                     DioAstStatement::IfStatement(v)

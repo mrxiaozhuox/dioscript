@@ -40,6 +40,14 @@ pub enum DioAstStatement {
     IfStatement(ConditionalStatement),
     LoopStatement(LoopStatement),
     LineComment(String),
+    FunctionCall(FunctionCall),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionCall {
+    pub namespace: Vec<String>,
+    pub name: String,
+    pub arguments: Vec<AstValue>,
 }
 
 #[derive(Debug, Clone)]

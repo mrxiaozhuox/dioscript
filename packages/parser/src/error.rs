@@ -45,4 +45,7 @@ pub enum RuntimeError {
 
     #[error("cannot find `{index}` in `{value}` value.")]
     IndexNotFound { index: String, value: String },
+
+    #[error("need arguments number `{need}`, provided `{provided}`.")]
+    IllegalArgumentsNumber { need: i16, provided: i16 },
 }
