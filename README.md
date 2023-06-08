@@ -5,17 +5,17 @@
 > Dioscript is a script language use for generate web elements.
 
 ```dioscript
-@username = "YuKun Liu";
-@login = false;
+username = "YuKun Liu";
+login = false;
 
-@display_navbar = true;
-if !@display_navbar {
+display_navbar = true;
+if display_navbar == false {
     return "unavailable navbar.";
 }
 
 return div {
     class: "navbar",
-    h1 { @username },
+    h1 { username },
     if login {
         return h2 { "Hello User!" };
     } else {
@@ -27,7 +27,47 @@ return div {
 
 
 
-##
+## Function Bind
+
+Currently, You can bind **Rust** function to dioscript-runtime, and call it in dioscript code.
+
+```rust
+fn element_to_html(args: Vec<Value>) -> Value {
+    let v = args.get(0).unwrap();
+    if let Value::Element(e) = v {
+        return Value::String(e.to_html());
+    }
+    Value::None
+}
+
+// import function
+runtime.add_function(
+    // namespace
+    vec!["std".to_string(), "value".to_string()], 
+    // function name
+    "to_html", 
+    (
+        // function closure
+        |v| { element_to_html(v) },
+        // arguments number limit
+        1,
+    )
+);
+
+```
+
+```dioscript
+e = div {
+    class: "main",
+    p { "Hello Dioscropt" }
+};
+
+return std::value::to_html(e);
+
+// result
+// <div class="main"><p>Hello Dioscript</p></div>
+
+```
 
 
 
