@@ -281,7 +281,7 @@ impl Runtime {
                                         provided: par.len() as i16,
                                     });
                                 }
-                                return Ok(f(par));
+                                return Ok(f(self, par));
                             }
                         }
                     }

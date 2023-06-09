@@ -6,12 +6,12 @@ pub type Exporter = (Vec<String>, HashMap<String, (Function, i16)>);
 pub mod value {
     use dioscript_parser::types::Value;
 
-    use crate::function::Function;
+    use crate::{function::Function, Runtime};
     use std::collections::HashMap;
 
     use super::Exporter;
 
-    pub fn type_name(args: Vec<Value>) -> Value {
+    pub fn type_name(_: &mut Runtime, args: Vec<Value>) -> Value {
         let value = args.get(0).unwrap();
         return Value::String(value.value_name());
     }
@@ -27,16 +27,16 @@ pub mod console {
 
     use dioscript_parser::types::Value;
 
-    use crate::function::Function;
+    use crate::{function::Function, Runtime};
 
     use super::Exporter;
 
-    pub fn print(args: Vec<Value>) -> Value {
+    pub fn print(_: &mut Runtime, args: Vec<Value>) -> Value {
         print!("{}", iterable_to_str(args));
         return Value::None;
     }
 
-    pub fn println(args: Vec<Value>) -> Value {
+    pub fn println(_: &mut Runtime, args: Vec<Value>) -> Value {
         println!("{}", iterable_to_str(args));
         return Value::None;
     }
@@ -62,15 +62,37 @@ pub mod console {
     }
 }
 
+pub mod runtime {
+
+    use dioscript_parser::types::Value;
+
+    use crate::{function::Function, Runtime};
+    use std::collections::HashMap;
+
+    use super::Exporter;
+
+    pub fn execute(rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let value = args.get(0).unwrap();
+        if let Value::String(v) = value {
+            let result = rt.execute(&v).unwrap();
+            return result;
+        }
+        Value::None
+    }
+
+    pub fn export() -> Exporter {
+        let map: HashMap<String, (Function, i16)> = HashMap::new();
+        (vec!["std".to_string(), "runtime".to_string()], map)
+    }
+}
+
 pub fn root_export() -> Exporter {
     let mut map: HashMap<String, (Function, i16)> = HashMap::new();
-    map.insert("type".to_string(), (Box::new(|v| value::type_name(v)), 1));
+    map.insert("type".to_string(), (value::type_name, 1));
 
-    map.insert("print".to_string(), (Box::new(|v| console::print(v)), -1));
-    map.insert(
-        "println".to_string(),
-        (Box::new(|v| console::println(v)), -1),
-    );
+    map.insert("print".to_string(), (console::print, -1));
+    map.insert("println".to_string(), (console::println, -1));
 
+    map.insert("execute".to_string(), (runtime::execute, -1));
     (vec![], map)
 }
