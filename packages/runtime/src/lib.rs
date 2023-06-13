@@ -23,6 +23,8 @@ pub struct Runtime {
     scope: Tree<ScopeType>,
     // root scope: root tree id.
     root_scope: NodeId,
+    // function handle scope tree id.
+    function_caller_scope: NodeId,
     // functions content: use for save function node-id.
     functions: HashMap<String, NodeId>,
 }
@@ -34,10 +36,18 @@ impl Runtime {
             .insert(Node::new(ScopeType::Block), id_tree::InsertBehavior::AsRoot)
             .expect("Scope init failed.");
 
+        let func_scope = scope
+            .insert(
+                Node::new(ScopeType::Block),
+                id_tree::InsertBehavior::UnderNode(&root),
+            )
+            .expect("Scope init failed.");
+
         let mut this = Self {
             vars: HashMap::new(),
             scope,
             root_scope: root,
+            function_caller_scope: func_scope,
             functions: HashMap::new(),
         };
 
@@ -199,7 +209,7 @@ impl Runtime {
                     }
                 }
                 DioAstStatement::FunctionCall(func) => {
-                    let _result = self.execute_function(func, current_scope)?;
+                    let _result = self.execute_function(func)?;
                 }
                 DioAstStatement::FunctionDefine(define) => {
                     let f = self.add_ds_function(define)?;
@@ -254,18 +264,15 @@ impl Runtime {
                 Ok(data)
             }
             AstValue::FunctionCaller(caller) => {
-                let data = self.execute_function(caller, current_scope)?;
+                let data = self.execute_function(caller)?;
                 Ok(data)
             }
             AstValue::FunctionDefine(define) => Ok(Value::Function(define)),
         }
     }
 
-    fn execute_function(
-        &mut self,
-        caller: FunctionCall,
-        current_scope: &NodeId,
-    ) -> Result<Value, RuntimeError> {
+    fn execute_function(&mut self, caller: FunctionCall) -> Result<Value, RuntimeError> {
+        let current_scope = self.function_caller_scope.clone();
         let name = if caller.namespace.is_empty() {
             caller.name.to_string()
         } else {
@@ -274,14 +281,14 @@ impl Runtime {
         let params = caller.arguments;
         let mut par = vec![];
         for i in params {
-            let v = self.to_value(i, current_scope)?;
+            let v = self.to_value(i, &current_scope)?;
             par.push(v);
         }
         if let Some(ref_scope) = self.functions.get(&name) {
             if let Ok(ref_node) = self.scope.get(ref_scope) {
                 let mut flag = false;
                 let ref_node_id = ref_node.parent().unwrap();
-                let mut curr_node_id = current_scope;
+                let mut curr_node_id = &current_scope;
 
                 loop {
                     if curr_node_id == ref_node_id {
