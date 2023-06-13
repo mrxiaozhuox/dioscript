@@ -41,6 +41,7 @@ pub enum DioAstStatement {
     LoopStatement(LoopStatement),
     LineComment(String),
     FunctionCall(FunctionCall),
+    FunctionDefine(FunctionDefine),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,16 +51,16 @@ pub struct FunctionCall {
     pub arguments: Vec<AstValue>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDefine {
     pub name: Option<String>,
     pub params: ParamsType,
     pub inner: Vec<DioAstStatement>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ParamsType {
-    Variable,
+    Variable(String),
     List(Vec<String>),
 }
 

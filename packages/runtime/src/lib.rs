@@ -54,12 +54,12 @@ impl Runtime {
     pub fn add_function_list(&mut self, list: Exporter) -> Result<(), RuntimeError> {
         let namespace = list.0.clone();
         for (name, (function, param_num)) in list.1 {
-            self.add_function(namespace.clone(), &name, function, param_num)?;
+            self.add_bind_function(namespace.clone(), &name, function, param_num)?;
         }
         Ok(())
     }
 
-    pub fn add_function(
+    pub fn add_bind_function(
         &mut self,
         namespace: Vec<String>,
         name: &str,
@@ -78,6 +78,23 @@ impl Runtime {
         self.functions
             .insert(full_name.to_string(), new_scope.clone());
         Ok(new_scope)
+    }
+
+    pub fn add_ds_function(
+        &mut self,
+        func: FunctionDefine,
+    ) -> Result<(Option<NodeId>, Value), RuntimeError> {
+        let full_name = func.name.clone();
+        if let Some(name) = full_name {
+            let new_scope = self.scope.insert(
+                Node::new(ScopeType::Function(FunctionType::DSF(func.clone()))),
+                id_tree::InsertBehavior::UnderNode(&self.root_scope),
+            )?;
+            self.functions.insert(name.to_string(), new_scope.clone());
+            Ok((Some(new_scope), Value::Function(func)))
+        } else {
+            Ok((None, Value::Function(func)))
+        }
     }
 
     pub fn execute(&mut self, code: &str) -> Result<Value, Error> {
@@ -184,6 +201,12 @@ impl Runtime {
                 DioAstStatement::FunctionCall(func) => {
                     let _result = self.execute_function(func, current_scope)?;
                 }
+                DioAstStatement::FunctionDefine(define) => {
+                    let f = self.add_ds_function(define)?;
+                    if f.0.is_none() {
+                        return Err(RuntimeError::AnonymousFunctionInRoot);
+                    }
+                }
                 _ => {}
             }
         }
@@ -234,6 +257,7 @@ impl Runtime {
                 let data = self.execute_function(caller, current_scope)?;
                 Ok(data)
             }
+            AstValue::FunctionDefine(define) => Ok(Value::Function(define)),
         }
     }
 
@@ -273,7 +297,35 @@ impl Runtime {
                 if flag {
                     if let ScopeType::Function(v) = ref_node.data() {
                         match v {
-                            FunctionType::DSF(_) => return Ok(Value::None),
+                            FunctionType::DSF(f) => {
+                                let f = f.clone();
+                                let new_scope = self.scope.insert(
+                                    Node::new(ScopeType::Block),
+                                    id_tree::InsertBehavior::UnderNode(&self.root_scope),
+                                )?;
+                                match &f.params {
+                                    dioscript_parser::ast::ParamsType::Variable(v) => {
+                                        self.set_ref(v, Value::List(par), &new_scope)?;
+                                    }
+                                    dioscript_parser::ast::ParamsType::List(v) => {
+                                        if v.len() != par.len() {
+                                            return Err(RuntimeError::IllegalArgumentsNumber {
+                                                need: v.len() as i16,
+                                                provided: par.len() as i16,
+                                            });
+                                        }
+                                        for (i, v) in v.iter().enumerate() {
+                                            self.set_ref(
+                                                v,
+                                                par.get(i).unwrap().clone(),
+                                                &new_scope,
+                                            )?;
+                                        }
+                                    }
+                                }
+                                let result = self.execute_scope(f.inner, &new_scope)?;
+                                return Ok(result);
+                            }
                             FunctionType::RSF((f, need_param_num)) => {
                                 if *need_param_num != -1 && (par.len() as i16) != *need_param_num {
                                     return Err(RuntimeError::IllegalArgumentsNumber {
@@ -288,7 +340,7 @@ impl Runtime {
                 }
             }
         }
-        Err(RuntimeError::VariableNotFound {
+        Err(RuntimeError::FunctionNotFound {
             name: name.to_string(),
         })
     }

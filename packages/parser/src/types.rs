@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{CalculateMark, FunctionCall},
+    ast::{CalculateMark, FunctionCall, FunctionDefine},
     element::{AstElement, Element},
     error::RuntimeError,
 };
@@ -19,6 +19,7 @@ pub enum AstValue {
     Variable(String),
     VariableIndex((String, Box<AstValue>)),
     FunctionCaller(FunctionCall),
+    FunctionDefine(FunctionDefine),
 }
 
 impl AstValue {
@@ -35,6 +36,7 @@ impl AstValue {
             AstValue::Variable(_) => "variable",
             AstValue::VariableIndex(_) => "variable[index]",
             AstValue::FunctionCaller(_) => "call[func]",
+            AstValue::FunctionDefine(_) => "def[func]",
         }
         .to_string()
     }
@@ -122,6 +124,7 @@ pub enum Value {
     Dict(HashMap<String, Value>),
     Tuple((Box<Value>, Box<Value>)),
     Element(Element),
+    Function(FunctionDefine),
 }
 
 impl ToString for Value {
@@ -135,6 +138,7 @@ impl ToString for Value {
             Value::Dict(_) => "{ dict }".to_string(),
             Value::Tuple(_) => "( tuple )".to_string(),
             Value::Element(_) => "{ element }".to_string(),
+            Value::Function(_) => "[ function ]".to_string(),
         }
     }
 }
@@ -150,6 +154,7 @@ impl Value {
             Value::Dict(_) => "dict",
             Value::Tuple(_) => "tuple",
             Value::Element(_) => "element",
+            Value::Function(_) => "function",
         }
         .to_string()
     }
@@ -232,6 +237,7 @@ impl Value {
                 a.to_boolean_data() && b.to_boolean_data()
             }
             Value::Element(_) => false,
+            Value::Function(_) => false,
         }
     }
 

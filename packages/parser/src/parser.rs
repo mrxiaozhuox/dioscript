@@ -208,6 +208,7 @@ impl TypeParser {
                 map(TypeParser::tuple, AstValue::Tuple),
                 map(ElementParser::parse, AstValue::Element),
                 map(FunctionParser::call, AstValue::FunctionCaller),
+                map(FunctionParser::define, AstValue::FunctionDefine),
                 map(TypeParser::variable_index, AstValue::VariableIndex),
                 map(TypeParser::variable, AstValue::Variable),
             )),
@@ -379,7 +380,9 @@ impl FunctionParser {
                     delimited(
                         tag("("),
                         alt((
-                            map(tag("..."), |_| ParamsType::Variable),
+                            map(preceded(tag("@"), Self::parse_function_name), |name| {
+                                ParamsType::Variable(name)
+                            }),
                             map(
                                 separated_list0(
                                     tag(","),
@@ -610,6 +613,9 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
                 }),
                 map(StatementParser::parse_while, |v| {
                     DioAstStatement::LoopStatement(v)
+                }),
+                map(FunctionParser::define, |v| {
+                    DioAstStatement::FunctionDefine(v)
                 }),
             )),
             multispace0,

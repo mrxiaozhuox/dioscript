@@ -31,6 +31,9 @@ pub enum RuntimeError {
     #[error("variable `{name}` not found.")]
     VariableNotFound { name: String },
 
+    #[error("function `{name}` not found.")]
+    FunctionNotFound { name: String },
+
     #[error("scope node id have some problem.")]
     ScopeNodeIdProblem(#[from] id_tree::NodeIdError),
 
@@ -48,4 +51,7 @@ pub enum RuntimeError {
 
     #[error("need arguments number `{need}`, provided `{provided}`.")]
     IllegalArgumentsNumber { need: i16, provided: i16 },
+
+    #[error("you must use a variable to receive anonymous function.")]
+    AnonymousFunctionInRoot,
 }
