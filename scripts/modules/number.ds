@@ -1,0 +1,22 @@
+value = import("std.value");
+
+return {
+    "plus": fn (@args) {
+        res = 0;
+        for i in args {
+            res = res + i;
+        }
+        return result;
+    },
+    "minus": fn (@args) {
+        if len(args) <= 0 {
+            return 0;
+        }
+        base = args[0];
+        value.remove(args, 0);
+        for i in args {
+            base = base - i;
+        }
+        return base;
+    }
+}

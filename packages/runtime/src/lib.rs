@@ -4,14 +4,14 @@ use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use dioscript_parser::{
     ast::{
-        CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine, LoopExecuteType,
+        CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine,
+        LoopExecuteType, ParamsType,
     },
     element::{AstElement, AstElementContentType, Element, ElementContentType},
     error::{Error, RuntimeError},
     parser::CalcExpr,
     types::{AstValue, Value},
 };
-use stdlib::Exporter;
 
 pub mod function;
 pub mod stdlib;
@@ -25,8 +25,6 @@ pub struct Runtime {
     root_scope: NodeId,
     // function handle scope tree id.
     function_caller_scope: NodeId,
-    // functions content: use for save function node-id.
-    functions: HashMap<String, NodeId>,
 }
 
 impl Runtime {
@@ -48,63 +46,49 @@ impl Runtime {
             scope,
             root_scope: root,
             function_caller_scope: func_scope,
-            functions: HashMap::new(),
         };
 
-        this.add_function_list(crate::stdlib::value::export())
-            .unwrap();
-        this.add_function_list(crate::stdlib::console::export())
-            .unwrap();
-        this.add_function_list(crate::stdlib::root_export())
-            .unwrap();
+        let root = crate::stdlib::root::export(&mut this).expect("init runtime failed.");
+        if let Value::Dict(map) = root {
+            let root_scope = this.root_scope.clone();
+            for (n, t) in map {
+                this.set_ref(&n, t, &root_scope).unwrap();
+            }
+        }
 
         this
     }
 
-    pub fn add_function_list(&mut self, list: Exporter) -> Result<(), RuntimeError> {
-        let namespace = list.0.clone();
-        for (name, (function, param_num)) in list.1 {
-            self.add_bind_function(namespace.clone(), &name, function, param_num)?;
-        }
-        Ok(())
-    }
-
-    pub fn add_bind_function(
-        &mut self,
-        namespace: Vec<String>,
-        name: &str,
-        func: function::Function,
-        param_number: i16,
-    ) -> Result<NodeId, RuntimeError> {
-        let full_name = if namespace.is_empty() {
-            name.to_string()
-        } else {
-            format!("{0}::{name}", namespace.join("::"))
-        };
-        let new_scope = self.scope.insert(
-            Node::new(ScopeType::Function(FunctionType::RSF((func, param_number)))),
-            id_tree::InsertBehavior::UnderNode(&self.root_scope),
-        )?;
-        self.functions
-            .insert(full_name.to_string(), new_scope.clone());
-        Ok(new_scope)
-    }
-
-    pub fn add_ds_function(
+    pub fn add_script_function(
         &mut self,
         func: FunctionDefine,
     ) -> Result<(Option<NodeId>, Value), RuntimeError> {
         let full_name = func.name.clone();
         if let Some(name) = full_name {
-            let new_scope = self.scope.insert(
-                Node::new(ScopeType::Function(FunctionType::DSF(func.clone()))),
-                id_tree::InsertBehavior::UnderNode(&self.root_scope),
-            )?;
-            self.functions.insert(name.to_string(), new_scope.clone());
+            let root_scope = self.root_scope.clone();
+            let new_scope = self.set_ref(&name, Value::Function(func.clone()), &root_scope)?;
             Ok((Some(new_scope), Value::Function(func)))
         } else {
             Ok((None, Value::Function(func)))
         }
+    }
+
+    pub fn add_bind_function(
+        &mut self,
+        sign: &str,
+        name: &str,
+        func: (function::Function, i32),
+    ) -> Result<(NodeId, Value), RuntimeError> {
+        let root_scope = self.root_scope.clone();
+        let full_name = format!("@internal.{sign}.{name}");
+        let new_scope =
+            self.set_scope(&full_name, VariableType::BindFunction(func), &root_scope)?;
+        let caller_value = Value::Function(FunctionDefine {
+            name: Some(full_name),
+            params: ParamsType::Variable("@bind-function".into()),
+            inner: vec![],
+        });
+        Ok((new_scope, caller_value))
     }
 
     pub fn execute(&mut self, code: &str) -> Result<Value, Error> {
@@ -209,10 +193,10 @@ impl Runtime {
                     }
                 }
                 DioAstStatement::FunctionCall(func) => {
-                    let _result = self.execute_function(func)?;
+                    let _result = self.execute_function(func, current_scope)?;
                 }
                 DioAstStatement::FunctionDefine(define) => {
-                    let f = self.add_ds_function(define)?;
+                    let f = self.add_script_function(define)?;
                     if f.0.is_none() {
                         return Err(RuntimeError::AnonymousFunctionInRoot);
                     }
@@ -254,8 +238,13 @@ impl Runtime {
                 Ok(Value::Element(element))
             }
             AstValue::Variable(n) => {
-                let value = self.get_ref(&n, current_scope)?;
-                Ok(value.1.value)
+                let value = self.get_ref(&n, current_scope)?.1;
+                let value = if let VariableType::Value(v) = value {
+                    v.value
+                } else {
+                    Value::None
+                };
+                Ok(value)
             }
             AstValue::VariableIndex((n, i)) => {
                 let value = self.to_value(AstValue::Variable(n), current_scope)?;
@@ -264,92 +253,133 @@ impl Runtime {
                 Ok(data)
             }
             AstValue::FunctionCaller(caller) => {
-                let data = self.execute_function(caller)?;
+                let data = self.execute_function(caller, current_scope)?;
                 Ok(data)
             }
             AstValue::FunctionDefine(define) => Ok(Value::Function(define)),
         }
     }
 
-    fn execute_function(&mut self, caller: FunctionCall) -> Result<Value, RuntimeError> {
-        let current_scope = self.function_caller_scope.clone();
-        let name = if caller.namespace.is_empty() {
-            caller.name.to_string()
-        } else {
-            format!("{}::{}", caller.namespace.join("::"), caller.name.clone())
-        };
+    fn execute_function(
+        &mut self,
+        caller: FunctionCall,
+        current_scope: &NodeId,
+    ) -> Result<Value, RuntimeError> {
+        let runtime_scope = self.function_caller_scope.clone();
+        let name = caller.name;
         let params = caller.arguments;
         let mut par = vec![];
         for i in params {
             let v = self.to_value(i, &current_scope)?;
             par.push(v);
         }
-        if let Some(ref_scope) = self.functions.get(&name) {
-            if let Ok(ref_node) = self.scope.get(ref_scope) {
-                let mut flag = false;
-                let ref_node_id = ref_node.parent().unwrap();
-                let mut curr_node_id = &current_scope;
 
-                loop {
-                    if curr_node_id == ref_node_id {
-                        flag = true;
-                        break;
-                    }
-                    if let Some(v) = self.scope.get(curr_node_id)?.parent() {
-                        curr_node_id = v;
+        let func = if caller.location.is_empty() {
+            let mut result = None;
+            let info = self.get_ref(&name, current_scope)?.1;
+            if let VariableType::Value(v) = info {
+                if let Value::Function(f) = v.value {
+                    result = Some(f);
+                }
+            } else {
+                return Err(RuntimeError::CallMeatBindFunction);
+            }
+            result
+        } else {
+            let mut location = caller.location;
+            let mut result = None;
+
+            let temp = self.get_ref(&location.get(0).unwrap(), current_scope)?.1;
+            location.remove(0);
+            if let VariableType::Value(temp) = temp {
+                let mut temp = temp.value;
+                let mut flag = false;
+                for p in &location {
+                    if let Value::Dict(map) = &temp {
+                        if let Some(Value::Dict(sub_map)) = map.get(p) {
+                            temp = Value::Dict(sub_map.clone());
+                            flag = true;
+                        } else {
+                            flag = false;
+                            break;
+                        }
                     } else {
+                        flag = false;
                         break;
                     }
                 }
-                if flag {
-                    if let ScopeType::Function(v) = ref_node.data() {
-                        match v {
-                            FunctionType::DSF(f) => {
-                                let f = f.clone();
-                                let new_scope = self.scope.insert(
-                                    Node::new(ScopeType::Block),
-                                    id_tree::InsertBehavior::UnderNode(&self.root_scope),
-                                )?;
-                                match &f.params {
-                                    dioscript_parser::ast::ParamsType::Variable(v) => {
-                                        self.set_ref(v, Value::List(par), &new_scope)?;
-                                    }
-                                    dioscript_parser::ast::ParamsType::List(v) => {
-                                        if v.len() != par.len() {
-                                            return Err(RuntimeError::IllegalArgumentsNumber {
-                                                need: v.len() as i16,
-                                                provided: par.len() as i16,
-                                            });
-                                        }
-                                        for (i, v) in v.iter().enumerate() {
-                                            self.set_ref(
-                                                v,
-                                                par.get(i).unwrap().clone(),
-                                                &new_scope,
-                                            )?;
-                                        }
-                                    }
-                                }
-                                let result = self.execute_scope(f.inner, &new_scope)?;
-                                return Ok(result);
-                            }
-                            FunctionType::RSF((f, need_param_num)) => {
-                                if *need_param_num != -1 && (par.len() as i16) != *need_param_num {
-                                    return Err(RuntimeError::IllegalArgumentsNumber {
-                                        need: *need_param_num,
-                                        provided: par.len() as i16,
-                                    });
-                                }
-                                return Ok(f(self, par));
-                            }
+                if flag || location.is_empty() {
+                    if let Value::Dict(map) = temp {
+                        if let Some(Value::Function(f)) = map.get(&name) {
+                            result = Some(f.clone());
                         }
                     }
                 }
             }
+            result
+        };
+
+        match func {
+            Some(f) => {
+                let f = f.clone();
+
+                if let Some(name) = f.name {
+                    if name.starts_with("@internal.") {
+                        let meta = self.get_ref(&name, current_scope);
+                        if let Ok((_, VariableType::BindFunction((f, need_param_num)))) = meta {
+                            if need_param_num != -1 && (par.len() as i32) != need_param_num {
+                                return Err(RuntimeError::IllegalArgumentsNumber {
+                                    need: need_param_num as i16,
+                                    provided: par.len() as i16,
+                                });
+                            }
+                            return Ok(f(self, par));
+                        } else {
+                            return Err(RuntimeError::BindFunctionNotFound {
+                                func: name.to_string(),
+                            });
+                        }
+                    }
+                }
+
+                let new_scope = self.scope.insert(
+                    Node::new(ScopeType::Block),
+                    id_tree::InsertBehavior::UnderNode(&runtime_scope),
+                )?;
+                match &f.params {
+                    dioscript_parser::ast::ParamsType::Variable(v) => {
+                        self.set_ref(v, Value::List(par), &new_scope)?;
+                    }
+                    dioscript_parser::ast::ParamsType::List(v) => {
+                        if v.len() != par.len() {
+                            return Err(RuntimeError::IllegalArgumentsNumber {
+                                need: v.len() as i16,
+                                provided: par.len() as i16,
+                            });
+                        }
+                        for (i, v) in v.iter().enumerate() {
+                            self.set_ref(v, par.get(i).unwrap().clone(), &new_scope)?;
+                        }
+                    }
+                }
+                let result = self.execute_scope(f.inner, &new_scope)?;
+                return Ok(result);
+            }
+            // Some(FunctionType::RSF((f, need_param_num))) => {
+            //     if need_param_num != -1 && (par.len() as i32) != need_param_num {
+            //         return Err(RuntimeError::IllegalArgumentsNumber {
+            //             need: need_param_num as i16,
+            //             provided: par.len() as i16,
+            //         });
+            //     }
+            //     return Ok(f(self, par));
+            // }
+            None => {
+                return Err(RuntimeError::FunctionNotFound {
+                    name: name.to_string(),
+                });
+            }
         }
-        Err(RuntimeError::FunctionNotFound {
-            name: name.to_string(),
-        })
     }
 
     fn execute_calculate(
@@ -423,11 +453,11 @@ impl Runtime {
         }
     }
 
-    fn get_ref(
+    fn get_scope(
         &self,
         name: &str,
         current_scope: &NodeId,
-    ) -> Result<(NodeId, Variable), RuntimeError> {
+    ) -> Result<(NodeId, &ScopeType), RuntimeError> {
         if let Some(ref_scope) = self.vars.get(name) {
             if let Ok(ref_node) = self.scope.get(ref_scope) {
                 let mut flag = false;
@@ -446,9 +476,8 @@ impl Runtime {
                     }
                 }
                 if flag {
-                    if let ScopeType::Variable(v) = ref_node.data() {
-                        return Ok((ref_node_id.clone(), v.clone()));
-                    }
+                    let data = ref_node.data();
+                    return Ok((ref_node_id.clone(), data));
                 }
             }
         }
@@ -457,27 +486,56 @@ impl Runtime {
         })
     }
 
+    fn get_ref(
+        &self,
+        name: &str,
+        current_scope: &NodeId,
+    ) -> Result<(NodeId, VariableType), RuntimeError> {
+        let v = self.get_scope(name, current_scope);
+        if let Ok((i, ScopeType::Variable(v))) = v {
+            return Ok((i, v.clone()));
+        }
+        Err(RuntimeError::VariableNotFound {
+            name: name.to_string(),
+        })
+    }
+
+    fn set_scope(
+        &mut self,
+        name: &str,
+        value: VariableType,
+        current_scope: &NodeId,
+    ) -> Result<NodeId, RuntimeError> {
+        if let Some(scope) = self.vars.get(name) {
+            let vars = self.scope.get_mut(scope)?.data_mut();
+            if let VariableType::Value(to) = value {
+                if let ScopeType::Variable(VariableType::Value(v)) = vars {
+                    v.value = to.value;
+                    v.counter += 1;
+                }
+            }
+            return Ok(scope.clone());
+        } else {
+            let new_scope = self.scope.insert(
+                Node::new(ScopeType::Variable(value)),
+                id_tree::InsertBehavior::UnderNode(current_scope),
+            )?;
+            self.vars.insert(name.to_string(), new_scope.clone());
+            return Ok(new_scope);
+        }
+    }
+
     fn set_ref(
         &mut self,
         name: &str,
         value: Value,
         current_scope: &NodeId,
     ) -> Result<NodeId, RuntimeError> {
-        if let Some(scope) = self.vars.get(name) {
-            let vars = self.scope.get_mut(scope)?.data_mut();
-            if let ScopeType::Variable(v) = vars {
-                v.value = value;
-                v.counter += 1;
-            }
-            return Ok(scope.clone());
-        } else {
-            let new_scope = self.scope.insert(
-                Node::new(ScopeType::Variable(Variable { value, counter: 1 })),
-                id_tree::InsertBehavior::UnderNode(current_scope),
-            )?;
-            self.vars.insert(name.to_string(), new_scope.clone());
-            return Ok(new_scope);
-        }
+        self.set_scope(
+            name,
+            VariableType::Value(Variable { value, counter: 0 }),
+            current_scope,
+        )
     }
 
     fn get_from_index(&self, value: Value, index: Value) -> Result<Value, RuntimeError> {
@@ -694,18 +752,12 @@ impl Runtime {
 
 pub enum ScopeType {
     Block,
-    Variable(Variable),
-    Function(FunctionType),
-}
-
-pub enum FunctionType {
-    DSF(FunctionDefine),
-    RSF((function::Function, i16)),
+    Variable(VariableType),
 }
 
 impl ScopeType {
     pub fn as_variable(&self) -> Option<Variable> {
-        if let Self::Variable(r) = self {
+        if let Self::Variable(VariableType::Value(r)) = self {
             return Some(r.clone());
         }
         None
@@ -716,4 +768,15 @@ impl ScopeType {
 pub struct Variable {
     pub value: Value,
     pub counter: u32,
+}
+
+#[derive(Debug, Clone)]
+pub enum VariableType {
+    Value(Variable),
+    BindFunction((function::Function, i32)),
+}
+
+pub enum FunctionType {
+    RSF((function::Function, i32)),
+    DSF(FunctionDefine),
 }

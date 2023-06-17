@@ -1,35 +1,9 @@
-use crate::function::Function;
-use std::collections::HashMap;
+pub mod root {
+    use dioscript_parser::{error::RuntimeError, types::Value};
 
-pub type Exporter = (Vec<String>, HashMap<String, (Function, i16)>);
+    use crate::{function::Exporter, Runtime};
 
-pub mod value {
-    use dioscript_parser::types::Value;
-
-    use crate::{function::Function, Runtime};
-    use std::collections::HashMap;
-
-    use super::Exporter;
-
-    pub fn type_name(_: &mut Runtime, args: Vec<Value>) -> Value {
-        let value = args.get(0).unwrap();
-        return Value::String(value.value_name());
-    }
-
-    pub fn export() -> Exporter {
-        let map: HashMap<String, (Function, i16)> = HashMap::new();
-        (vec!["std".to_string(), "value".to_string()], map)
-    }
-}
-
-pub mod console {
-    use std::collections::HashMap;
-
-    use dioscript_parser::types::Value;
-
-    use crate::{function::Function, Runtime};
-
-    use super::Exporter;
+    use super::math;
 
     pub fn print(_: &mut Runtime, args: Vec<Value>) -> Value {
         print!("{}", iterable_to_str(args));
@@ -56,21 +30,6 @@ pub mod console {
         format!("{}", body)
     }
 
-    pub fn export() -> Exporter {
-        let map: HashMap<String, (Function, i16)> = HashMap::new();
-        (vec!["std".to_string(), "value".to_string()], map)
-    }
-}
-
-pub mod runtime {
-
-    use dioscript_parser::types::Value;
-
-    use crate::{function::Function, Runtime};
-    use std::collections::HashMap;
-
-    use super::Exporter;
-
     pub fn execute(rt: &mut Runtime, args: Vec<Value>) -> Value {
         let value = args.get(0).unwrap();
         if let Value::String(v) = value {
@@ -80,19 +39,44 @@ pub mod runtime {
         Value::None
     }
 
-    pub fn export() -> Exporter {
-        let map: HashMap<String, (Function, i16)> = HashMap::new();
-        (vec!["std".to_string(), "runtime".to_string()], map)
+    pub fn import(rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let name = args.get(0).unwrap();
+        if let Value::String(name) = name {
+            match name.as_str() {
+                "math" => {
+                    return math::export(rt).unwrap();
+                }
+                _ => {}
+            }
+        }
+        Value::None
+    }
+
+    pub fn export(rt: &mut Runtime) -> Result<Value, RuntimeError> {
+        let mut exporter = Exporter::new("rf");
+        exporter.insert("print", (print, -1));
+        exporter.insert("println", (println, -1));
+        exporter.insert("execute", (execute, -1));
+        exporter.insert("import", (import, 1));
+        exporter.bind(rt)
     }
 }
 
-pub fn root_export() -> Exporter {
-    let mut map: HashMap<String, (Function, i16)> = HashMap::new();
-    map.insert("type".to_string(), (value::type_name, 1));
+pub mod math {
+    use dioscript_parser::{error::RuntimeError, types::Value};
 
-    map.insert("print".to_string(), (console::print, -1));
-    map.insert("println".to_string(), (console::println, -1));
+    use crate::{function::Exporter, Runtime};
 
-    map.insert("execute".to_string(), (runtime::execute, -1));
-    (vec![], map)
+    pub fn abs(_: &mut Runtime, args: Vec<Value>) -> Value {
+        let num = args.get(0).unwrap();
+        if let Value::Number(num) = num {
+            return Value::Number(num.abs());
+        }
+        Value::None
+    }
+    pub fn export(rt: &mut Runtime) -> Result<Value, RuntimeError> {
+        let mut exporter = Exporter::new("math");
+        exporter.insert("abs", (abs, 1));
+        exporter.bind(rt)
+    }
 }

@@ -328,26 +328,13 @@ impl CalculateParser {
 
 struct FunctionParser;
 impl FunctionParser {
-    fn parse_function_name(message: &str) -> IResult<&str, String> {
-        context(
-            "function name",
-            map(
-                pair(
-                    alpha1,
-                    take_while(|c: char| c.is_alphanumeric() || c == '_'),
-                ),
-                |(first, rest): (&str, &str)| format!("{}{}", first, rest).trim().to_string(),
-            ),
-        )(message)
-    }
-
     fn call(message: &str) -> IResult<&str, FunctionCall> {
         context(
             "function call",
             map(
                 tuple((
                     terminated(
-                        separated_list1(tag("::"), Self::parse_function_name),
+                        separated_list1(tag("."), VariableParser::parse_var_name),
                         tag("("),
                     ),
                     delimited(
@@ -357,11 +344,11 @@ impl FunctionParser {
                     ),
                     tag(")"),
                 )),
-                |(mut namespace, arguments, _)| {
-                    let name = namespace.last().unwrap().clone();
-                    namespace.remove(namespace.len() - 1);
+                |(mut location, arguments, _)| {
+                    let name = location.last().unwrap().clone();
+                    location.remove(location.len() - 1);
                     FunctionCall {
-                        namespace,
+                        location,
                         name,
                         arguments,
                     }
@@ -376,17 +363,17 @@ impl FunctionParser {
             map(
                 tuple((
                     pair(tag("fn"), space1),
-                    opt(terminated(Self::parse_function_name, space0)),
+                    opt(terminated(VariableParser::parse_var_name, space0)),
                     delimited(
                         tag("("),
                         alt((
-                            map(preceded(tag("@"), Self::parse_function_name), |name| {
+                            map(preceded(tag("@"), VariableParser::parse_var_name), |name| {
                                 ParamsType::Variable(name)
                             }),
                             map(
                                 separated_list0(
                                     tag(","),
-                                    delimited(space0, Self::parse_function_name, space0),
+                                    delimited(space0, VariableParser::parse_var_name, space0),
                                 ),
                                 |v| ParamsType::List(v),
                             ),

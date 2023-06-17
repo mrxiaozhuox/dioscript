@@ -46,7 +46,7 @@ pub enum DioAstStatement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionCall {
-    pub namespace: Vec<String>,
+    pub location: Vec<String>,
     pub name: String,
     pub arguments: Vec<AstValue>,
 }

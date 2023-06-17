@@ -54,4 +54,10 @@ pub enum RuntimeError {
 
     #[error("you must use a variable to receive anonymous function.")]
     AnonymousFunctionInRoot,
+
+    #[error("you are trying to call meta bind function.")]
+    CallMeatBindFunction,
+
+    #[error("cannot find bind function location: `{func}`.")]
+    BindFunctionNotFound { func: String },
 }

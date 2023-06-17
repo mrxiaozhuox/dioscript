@@ -108,7 +108,14 @@ pub fn main() {
                             let result = runtime.execute_ast(ast);
                             match result {
                                 Ok(r) => {
-                                    println!("\n[ds] Result: {:#?}\n", r);
+                                    if !r.as_none() {
+                                        println!("\n[ds] Result: {:#?}\n", r);
+                                    } else {
+                                        println!(
+                                            "\n[ds] 🚀 {}\n",
+                                            "execute successful!".green().bold()
+                                        );
+                                    }
                                 }
                                 Err(e) => {
                                     println!(
