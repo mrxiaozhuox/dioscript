@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::anyhow;
+use dioscript_runtime::types::Value;
 
 use crate::BuildArgs;
 
@@ -35,7 +36,7 @@ pub fn build(args: &BuildArgs) -> anyhow::Result<String> {
             let ast = dioscript_parser::ast::DioscriptAst::from_string(&file_content)?;
             let mut runtime = dioscript_runtime::Runtime::new();
             let result = runtime.execute_ast(ast)?;
-            if let dioscript_parser::types::Value::Element(e) = result {
+            if let Value::Element(e) = result {
                 let html = template.replace("<dioscript />", &e.to_html());
                 if !PathBuf::from(out_dir).is_dir() {
                     create_dir_all(out_dir)?;

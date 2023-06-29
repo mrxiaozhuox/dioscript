@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use error::{RuntimeError, Error};
 use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use dioscript_parser::{
@@ -7,14 +8,16 @@ use dioscript_parser::{
         CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine,
         LoopExecuteType, ParamsType,
     },
-    element::{AstElement, AstElementContentType, Element, ElementContentType},
-    error::{Error, RuntimeError},
+    element::{AstElement, AstElementContentType},
     parser::CalcExpr,
-    types::{AstValue, Value},
+    types::AstValue,
 };
+use types::{Value, ElementContentType, Element};
 
+pub mod error;
 pub mod function;
 pub mod stdlib;
+pub mod types;
 
 pub struct Runtime {
     // variable content: use for save variable node-id.
@@ -348,7 +351,7 @@ impl Runtime {
                 )?;
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
-                        self.set_ref(v, Value::List(par), &new_scope)?;
+                        self.set_ref(&v, Value::List(par), &new_scope)?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {

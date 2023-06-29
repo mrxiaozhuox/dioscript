@@ -1,4 +1,4 @@
-use dioscript_parser::types::Value;
+use dioscript_runtime::types::Value;
 use dioxus::prelude::*;
 
 #[allow(non_snake_case)]

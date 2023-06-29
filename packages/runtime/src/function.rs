@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use dioscript_parser::{error::RuntimeError, types::Value};
-
-use crate::Runtime;
+use crate::{Runtime, types::Value, error::RuntimeError};
 
 pub type Function = fn(&mut Runtime, Vec<Value>) -> Value;
 

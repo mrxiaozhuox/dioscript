@@ -1,7 +1,6 @@
 pub mod root {
-    use dioscript_parser::{error::RuntimeError, types::Value};
 
-    use crate::{function::Exporter, Runtime};
+    use crate::{function::Exporter, Runtime, types::Value, error::RuntimeError};
 
     use super::math;
 
@@ -63,9 +62,7 @@ pub mod root {
 }
 
 pub mod math {
-    use dioscript_parser::{error::RuntimeError, types::Value};
-
-    use crate::{function::Exporter, Runtime};
+    use crate::{function::Exporter, Runtime, types::Value, error::RuntimeError};
 
     pub fn abs(_: &mut Runtime, args: Vec<Value>) -> Value {
         let num = args.get(0).unwrap();
