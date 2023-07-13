@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dioscript_parser::ast::{FunctionDefine, CalculateMark};
+use dioscript_parser::ast::{CalculateMark, FunctionDefine};
 
 use crate::error::RuntimeError;
 
@@ -14,7 +14,14 @@ pub enum Value {
     Dict(HashMap<String, Value>),
     Tuple((Box<Value>, Box<Value>)),
     Element(Element),
-    Function(FunctionDefine),
+    Function(FunctionType),
+    Reference(id_tree::NodeId),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FunctionType {
+    BindFunction((crate::function::Function, i32)),
+    DefineFunction(FunctionDefine),
 }
 
 impl ToString for Value {
@@ -24,11 +31,12 @@ impl ToString for Value {
             Value::String(v) => v.clone(),
             Value::Number(v) => v.to_string(),
             Value::Boolean(v) => v.to_string(),
-            Value::List(_) => "[ list ]".to_string(),
-            Value::Dict(_) => "{ dict }".to_string(),
-            Value::Tuple(_) => "( tuple )".to_string(),
-            Value::Element(_) => "{ element }".to_string(),
-            Value::Function(_) => "[ function ]".to_string(),
+            Value::List(_) => "[ /* list */ ]".to_string(),
+            Value::Dict(_) => "{ /* dict */ }".to_string(),
+            Value::Tuple(_) => "( /* tuple */ )".to_string(),
+            Value::Element(_) => "element { /* element attributes */  }".to_string(),
+            Value::Function(_) => "fn () { /* function impl */  }".to_string(),
+            Value::Reference(_) => "/* &reference */".to_string(),
         }
     }
 }
@@ -45,6 +53,7 @@ impl Value {
             Value::Tuple(_) => "tuple",
             Value::Element(_) => "element",
             Value::Function(_) => "function",
+            Value::Reference(_) => "reference",
         }
         .to_string()
     }
@@ -115,19 +124,9 @@ impl Value {
 
     pub fn to_boolean_data(&self) -> bool {
         match self {
-            Value::None => false,
-            Value::String(_) => false,
             Value::Number(v) => *v != 0.0,
             Value::Boolean(v) => *v,
-            Value::List(_) => false,
-            Value::Dict(_) => false,
-            Value::Tuple(v) => {
-                let a = v.0.clone();
-                let b = v.1.clone();
-                a.to_boolean_data() && b.to_boolean_data()
-            }
-            Value::Element(_) => false,
-            Value::Function(_) => false,
+            _ => false,
         }
     }
 
@@ -245,7 +244,6 @@ impl Value {
         };
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Element {

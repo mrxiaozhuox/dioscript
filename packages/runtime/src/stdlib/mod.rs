@@ -1,8 +1,12 @@
+use std::collections::HashMap;
+
+use crate::types::Value;
+
 pub mod root {
 
-    use crate::{function::Exporter, Runtime, types::Value, error::RuntimeError};
+    use std::collections::HashMap;
 
-    use super::math;
+    use crate::{function::MethodBinder, types::Value, Runtime};
 
     pub fn print(_: &mut Runtime, args: Vec<Value>) -> Value {
         print!("{}", iterable_to_str(args));
@@ -38,42 +42,108 @@ pub mod root {
         Value::None
     }
 
-    pub fn import(rt: &mut Runtime, args: Vec<Value>) -> Value {
+    pub fn import(_rt: &mut Runtime, args: Vec<Value>) -> Value {
         let name = args.get(0).unwrap();
         if let Value::String(name) = name {
             match name.as_str() {
-                "math" => {
-                    return math::export(rt).unwrap();
-                }
                 _ => {}
             }
         }
         Value::None
     }
 
-    pub fn export(rt: &mut Runtime) -> Result<Value, RuntimeError> {
-        let mut exporter = Exporter::new("rf");
+    pub fn export() -> (
+        crate::function::BindTarget,
+        HashMap<std::string::String, Value>,
+    ) {
+        let mut exporter = MethodBinder::new(crate::function::BindTarget::Root);
+
         exporter.insert("print", (print, -1));
         exporter.insert("println", (println, -1));
+
         exporter.insert("execute", (execute, -1));
         exporter.insert("import", (import, 1));
-        exporter.bind(rt)
+        exporter.collect()
     }
 }
 
-pub mod math {
-    use crate::{function::Exporter, Runtime, types::Value, error::RuntimeError};
+mod string {
+    use std::collections::HashMap;
 
-    pub fn abs(_: &mut Runtime, args: Vec<Value>) -> Value {
-        let num = args.get(0).unwrap();
-        if let Value::Number(num) = num {
-            return Value::Number(num.abs());
+    use crate::{function::MethodBinder, types::Value, Runtime};
+
+    pub fn join(_rt: &mut Runtime, mut args: Vec<Value>) -> Value {
+        let this = args.get(0).unwrap().as_string().unwrap();
+        let mut result = this;
+        args.remove(0);
+        for i in args {
+            result.push_str(&i.to_string());
         }
-        Value::None
+        Value::String(result)
     }
-    pub fn export(rt: &mut Runtime) -> Result<Value, RuntimeError> {
-        let mut exporter = Exporter::new("math");
-        exporter.insert("abs", (abs, 1));
-        exporter.bind(rt)
+
+    pub fn len(_rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let this = args.get(0).unwrap().as_string().unwrap();
+        Value::Number(this.len() as f64)
     }
+
+    pub fn repeat(_rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let this = args.get(0).unwrap().as_string().unwrap();
+        let number = args.get(1).unwrap().as_number().unwrap_or(1.0);
+        Value::String(this.repeat(number as usize))
+    }
+
+    pub fn is_empty(_rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let this = args.get(0).unwrap().as_string().unwrap();
+        Value::Boolean(this.is_empty())
+    }
+
+    pub fn lowercase(_rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let this = args.get(0).unwrap().as_string().unwrap();
+        Value::String(this.to_lowercase())
+    }
+
+    pub fn uppercase(_rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let this = args.get(0).unwrap().as_string().unwrap();
+        Value::String(this.to_uppercase())
+    }
+
+    pub fn export() -> (
+        crate::function::BindTarget,
+        HashMap<std::string::String, Value>,
+    ) {
+        let mut exporter = MethodBinder::new(crate::function::BindTarget::String);
+
+        exporter.insert("join", (join, -1));
+        exporter.insert("len", (len, 1));
+        exporter.insert("repeat", (repeat, 2));
+
+        exporter.insert("is_empty", (is_empty, 1));
+
+        exporter.insert("lowercase", (lowercase, 1));
+        exporter.insert("uppercase", (uppercase, 1));
+
+        exporter.collect()
+    }
+}
+
+mod number {
+    use std::collections::HashMap;
+
+    use crate::{function::MethodBinder, types::Value};
+
+    pub fn export() -> (
+        crate::function::BindTarget,
+        HashMap<std::string::String, Value>,
+    ) {
+        let mut exporter = MethodBinder::new(crate::function::BindTarget::Number);
+        exporter.collect()
+    }
+}
+
+pub fn all() -> Vec<(crate::function::BindTarget, HashMap<String, Value>)> {
+    let mut result = vec![];
+    result.push(root::export());
+    result.push(string::export());
+    result
 }

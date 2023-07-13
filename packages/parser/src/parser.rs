@@ -5,7 +5,7 @@ use nom::{
     bytes::complete::{
         escaped, tag, tag_no_case, take_till1, take_until, take_while, take_while1, take_while_m_n,
     },
-    character::complete::{alpha1, alphanumeric1, char, multispace0, space0, space1},
+    character::complete::{alpha1, alphanumeric1, char, digit1, multispace0, space0, space1},
     combinator::{map, opt, peek, value},
     error::context,
     multi::{fold_many0, many0, separated_list0, separated_list1},
@@ -35,6 +35,7 @@ enum AttributeType {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CalcExpr {
     Value(AstValue),
+    LinkExpr(LinkExpr),
     Add(Box<CalcExpr>, Box<CalcExpr>),
     Sub(Box<CalcExpr>, Box<CalcExpr>),
     Mul(Box<CalcExpr>, Box<CalcExpr>),
@@ -48,6 +49,18 @@ pub enum CalcExpr {
     Le(Box<CalcExpr>, Box<CalcExpr>),
     And(Box<CalcExpr>, Box<CalcExpr>),
     Or(Box<CalcExpr>, Box<CalcExpr>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkExpr {
+    pub this: AstValue,
+    pub list: Vec<LinkExprPart>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LinkExprPart {
+    Field(String),
+    FunctionCall(FunctionCall),
 }
 
 struct TypeParser;
@@ -252,9 +265,42 @@ impl CalculateParser {
         delimited(
             space0,
             alt((
+                map(Self::link, |v| CalcExpr::LinkExpr(v)),
                 map(TypeParser::parse, |v| CalcExpr::Value(v)),
                 delimited(char('('), Self::expr, char(')')),
             )),
+            space0,
+        )(input)
+    }
+
+    fn link(input: &str) -> IResult<&str, LinkExpr> {
+        delimited(
+            space0,
+            map(
+                tuple((
+                    terminated(
+                        TypeParser::parse,
+                        delimited(multispace0, tag("."), multispace0),
+                    ),
+                    separated_list1(
+                        delimited(multispace0, tag("."), multispace0),
+                        alt((
+                            map(FunctionParser::call, |v| LinkExprPart::FunctionCall(v)),
+                            map(
+                                alt((
+                                    VariableParser::parse_var_name,
+                                    map(digit1, |v: &str| v.to_string()),
+                                )),
+                                |v| LinkExprPart::Field(v),
+                            ),
+                        )),
+                    ),
+                )),
+                |v| LinkExpr {
+                    this: v.0,
+                    list: v.1,
+                },
+            ),
             space0,
         )(input)
     }
@@ -333,10 +379,7 @@ impl FunctionParser {
             "function call",
             map(
                 tuple((
-                    terminated(
-                        separated_list1(tag("."), VariableParser::parse_var_name),
-                        tag("("),
-                    ),
+                    terminated(VariableParser::parse_var_name, tag("(")),
                     delimited(
                         space0,
                         separated_list0(tag(","), delimited(space0, TypeParser::parse, space0)),
@@ -344,15 +387,7 @@ impl FunctionParser {
                     ),
                     tag(")"),
                 )),
-                |(mut location, arguments, _)| {
-                    let name = location.last().unwrap().clone();
-                    location.remove(location.len() - 1);
-                    FunctionCall {
-                        location,
-                        name,
-                        arguments,
-                    }
-                },
+                |(name, arguments, _)| FunctionCall { name, arguments },
             ),
         )(message)
     }

@@ -1,18 +1,17 @@
 use std::collections::HashMap;
 
-use error::{RuntimeError, Error};
+use error::{Error, RuntimeError};
 use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use dioscript_parser::{
     ast::{
-        CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine,
-        LoopExecuteType, ParamsType,
+        CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine, LoopExecuteType,
     },
     element::{AstElement, AstElementContentType},
-    parser::CalcExpr,
+    parser::{CalcExpr, LinkExpr},
     types::AstValue,
 };
-use types::{Value, ElementContentType, Element};
+use types::{Element, ElementContentType, FunctionType, Value};
 
 pub mod error;
 pub mod function;
@@ -51,15 +50,46 @@ impl Runtime {
             function_caller_scope: func_scope,
         };
 
-        let root = crate::stdlib::root::export(&mut this).expect("init runtime failed.");
-        if let Value::Dict(map) = root {
-            let root_scope = this.root_scope.clone();
-            for (n, t) in map {
-                this.set_ref(&n, t, &root_scope).unwrap();
+        this.setup().expect("Runtime setup failed.");
+
+        this
+    }
+
+    fn setup(&mut self) -> Result<(), RuntimeError> {
+        let scope = self.root_scope.clone();
+
+        let mut types: HashMap<String, HashMap<String, Value>> = HashMap::new();
+
+        let functions = crate::stdlib::all();
+        println!("{:?}", functions);
+        for (target, list) in functions {
+            match target {
+                function::BindTarget::Root => {
+                    for (name, val) in list {
+                        self.set_var(&name, val, &scope)?;
+                    }
+                }
+                _ => {
+                    let target_name = target.to_string();
+                    if types.contains_key(&target_name) {
+                        let temp = types.get_mut(&target_name).unwrap();
+                        let _ = list.into_iter().map(|(k, v)| temp.insert(k, v));
+                    } else {
+                        types.insert(target_name, list);
+                    }
+                }
             }
         }
 
-        this
+        for (name, data) in types {
+            self.set_var(&name, Value::Dict(data), &scope)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn trace(&self) {
+        println!("{:#?}", self.vars);
     }
 
     pub fn add_script_function(
@@ -69,29 +99,21 @@ impl Runtime {
         let full_name = func.name.clone();
         if let Some(name) = full_name {
             let root_scope = self.root_scope.clone();
-            let new_scope = self.set_ref(&name, Value::Function(func.clone()), &root_scope)?;
-            Ok((Some(new_scope), Value::Function(func)))
+            let new_scope = self.set_var(
+                &name,
+                Value::Function(types::FunctionType::DefineFunction(func.clone())),
+                &root_scope,
+            )?;
+            Ok((
+                Some(new_scope),
+                Value::Function(types::FunctionType::DefineFunction(func)),
+            ))
         } else {
-            Ok((None, Value::Function(func)))
+            Ok((
+                None,
+                Value::Function(types::FunctionType::DefineFunction(func)),
+            ))
         }
-    }
-
-    pub fn add_bind_function(
-        &mut self,
-        sign: &str,
-        name: &str,
-        func: (function::Function, i32),
-    ) -> Result<(NodeId, Value), RuntimeError> {
-        let root_scope = self.root_scope.clone();
-        let full_name = format!("@internal.{sign}.{name}");
-        let new_scope =
-            self.set_scope(&full_name, VariableType::BindFunction(func), &root_scope)?;
-        let caller_value = Value::Function(FunctionDefine {
-            name: Some(full_name),
-            params: ParamsType::Variable("@bind-function".into()),
-            inner: vec![],
-        });
-        Ok((new_scope, caller_value))
     }
 
     pub fn execute(&mut self, code: &str) -> Result<Value, Error> {
@@ -105,7 +127,7 @@ impl Runtime {
         Ok(result)
     }
 
-    pub fn execute_scope(
+    fn execute_scope(
         &mut self,
         statements: Vec<DioAstStatement>,
         current_scope: &NodeId,
@@ -121,10 +143,11 @@ impl Runtime {
                     let name = var.0.clone();
                     let value = var.1.clone();
                     let value = self.execute_calculate(value, current_scope)?;
-                    let _scope = self.set_ref(&name, value, current_scope)?;
+                    let _scope = self.set_var(&name, value, current_scope)?;
                 }
                 DioAstStatement::ReturnValue(r) => {
                     result = self.execute_calculate(r.clone(), current_scope)?;
+                    result = self.deref_value(result, current_scope)?;
                     finish = true;
                 }
                 DioAstStatement::IfStatement(cond) => {
@@ -183,7 +206,7 @@ impl Runtime {
                             let iter = self.to_value(iter, current_scope)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
-                                    self.set_ref(&var, i.clone(), &sub_scope)?;
+                                    self.set_var(&var, i.clone(), &sub_scope)?;
                                     let res = self.execute_scope(data.inner.clone(), &sub_scope)?;
                                     if !res.as_none() {
                                         result = res;
@@ -237,16 +260,11 @@ impl Runtime {
                 Ok(Value::Tuple((Box::new(a), Box::new(b))))
             }
             AstValue::Element(e) => {
-                let element = self.execute_element(e, current_scope)?;
+                let element = self.to_element(e, current_scope)?;
                 Ok(Value::Element(element))
             }
             AstValue::Variable(n) => {
-                let value = self.get_ref(&n, current_scope)?.1;
-                let value = if let VariableType::Value(v) = value {
-                    v.value
-                } else {
-                    Value::None
-                };
+                let value = self.get_var(&n, current_scope)?.1;
                 Ok(value)
             }
             AstValue::VariableIndex((n, i)) => {
@@ -259,7 +277,62 @@ impl Runtime {
                 let data = self.execute_function(caller, current_scope)?;
                 Ok(data)
             }
-            AstValue::FunctionDefine(define) => Ok(Value::Function(define)),
+            AstValue::FunctionDefine(define) => {
+                Ok(Value::Function(types::FunctionType::DefineFunction(define)))
+            }
+        }
+    }
+
+    fn deref_value(&self, value: Value, current_scope: &NodeId) -> Result<Value, RuntimeError> {
+        match value {
+            Value::List(list) => {
+                let mut new = vec![];
+                for i in list {
+                    let v = self.deref_value(i, current_scope)?;
+                    new.push(v);
+                }
+                Ok(Value::List(new))
+            }
+            Value::Dict(dict) => {
+                let mut new = HashMap::new();
+                for (k, v) in dict {
+                    let v = self.deref_value(v, current_scope)?;
+                    new.insert(k, v);
+                }
+                Ok(Value::Dict(new))
+            }
+            Value::Tuple(tuple) => {
+                let first = self.deref_value(*tuple.0, current_scope)?;
+                let second = self.deref_value(*tuple.1, current_scope)?;
+                Ok(Value::Tuple((Box::new(first), Box::new(second))))
+            }
+            Value::Reference(id) => {
+                let ref_node = self.scope.get(&id)?;
+
+                let mut flag = false;
+                let ref_node_id = ref_node.parent().unwrap();
+                let mut curr_node_id = current_scope;
+
+                loop {
+                    if curr_node_id == ref_node_id {
+                        flag = true;
+                        break;
+                    }
+                    if let Some(v) = self.scope.get(curr_node_id)?.parent() {
+                        curr_node_id = v;
+                    } else {
+                        break;
+                    }
+                }
+                if flag {
+                    let data = ref_node.data();
+                    if let ScopeType::Variable(v) = data {
+                        return Ok(v.value.clone());
+                    }
+                }
+                Err(RuntimeError::ReferenceNotFound { reference: id })
+            }
+            _ => Ok(value),
         }
     }
 
@@ -277,81 +350,25 @@ impl Runtime {
             par.push(v);
         }
 
-        let func = if caller.location.is_empty() {
+        let func = {
             let mut result = None;
-            let info = self.get_ref(&name, current_scope)?.1;
-            if let VariableType::Value(v) = info {
-                if let Value::Function(f) = v.value {
-                    result = Some(f);
-                }
-            } else {
-                return Err(RuntimeError::CallMeatBindFunction);
-            }
-            result
-        } else {
-            let mut location = caller.location;
-            let mut result = None;
-
-            let temp = self.get_ref(&location.get(0).unwrap(), current_scope)?.1;
-            location.remove(0);
-            if let VariableType::Value(temp) = temp {
-                let mut temp = temp.value;
-                let mut flag = false;
-                for p in &location {
-                    if let Value::Dict(map) = &temp {
-                        if let Some(Value::Dict(sub_map)) = map.get(p) {
-                            temp = Value::Dict(sub_map.clone());
-                            flag = true;
-                        } else {
-                            flag = false;
-                            break;
-                        }
-                    } else {
-                        flag = false;
-                        break;
-                    }
-                }
-                if flag || location.is_empty() {
-                    if let Value::Dict(map) = temp {
-                        if let Some(Value::Function(f)) = map.get(&name) {
-                            result = Some(f.clone());
-                        }
-                    }
-                }
+            let info = self.get_var(&name, current_scope)?.1;
+            if let Value::Function(f) = info {
+                result = Some(f);
             }
             result
         };
 
         match func {
-            Some(f) => {
+            Some(types::FunctionType::DefineFunction(f)) => {
                 let f = f.clone();
-
-                if let Some(name) = f.name {
-                    if name.starts_with("@internal.") {
-                        let meta = self.get_ref(&name, current_scope);
-                        if let Ok((_, VariableType::BindFunction((f, need_param_num)))) = meta {
-                            if need_param_num != -1 && (par.len() as i32) != need_param_num {
-                                return Err(RuntimeError::IllegalArgumentsNumber {
-                                    need: need_param_num as i16,
-                                    provided: par.len() as i16,
-                                });
-                            }
-                            return Ok(f(self, par));
-                        } else {
-                            return Err(RuntimeError::BindFunctionNotFound {
-                                func: name.to_string(),
-                            });
-                        }
-                    }
-                }
-
                 let new_scope = self.scope.insert(
                     Node::new(ScopeType::Block),
                     id_tree::InsertBehavior::UnderNode(&runtime_scope),
                 )?;
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
-                        self.set_ref(&v, Value::List(par), &new_scope)?;
+                        self.set_var(&v, Value::List(par), &new_scope)?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {
@@ -361,26 +378,72 @@ impl Runtime {
                             });
                         }
                         for (i, v) in v.iter().enumerate() {
-                            self.set_ref(v, par.get(i).unwrap().clone(), &new_scope)?;
+                            self.set_var(v, par.get(i).unwrap().clone(), &new_scope)?;
                         }
                     }
                 }
                 let result = self.execute_scope(f.inner, &new_scope)?;
                 return Ok(result);
             }
-            // Some(FunctionType::RSF((f, need_param_num))) => {
-            //     if need_param_num != -1 && (par.len() as i32) != need_param_num {
-            //         return Err(RuntimeError::IllegalArgumentsNumber {
-            //             need: need_param_num as i16,
-            //             provided: par.len() as i16,
-            //         });
-            //     }
-            //     return Ok(f(self, par));
-            // }
+            Some(types::FunctionType::BindFunction((f, need_param_num))) => {
+                if need_param_num != -1 && (par.len() as i32) != need_param_num {
+                    return Err(RuntimeError::IllegalArgumentsNumber {
+                        need: need_param_num as i16,
+                        provided: par.len() as i16,
+                    });
+                }
+                return Ok(f(self, par));
+            }
             None => {
                 return Err(RuntimeError::FunctionNotFound {
                     name: name.to_string(),
                 });
+            }
+        }
+    }
+
+    fn execute_function_by_ft(
+        &mut self,
+        func: FunctionType,
+        par: Vec<Value>,
+        current_scope: &NodeId,
+    ) -> Result<Value, RuntimeError> {
+        let runtime_scope = self.function_caller_scope.clone();
+        match func {
+            types::FunctionType::DefineFunction(f) => {
+                let f = f.clone();
+                let new_scope = self.scope.insert(
+                    Node::new(ScopeType::Block),
+                    id_tree::InsertBehavior::UnderNode(&runtime_scope),
+                )?;
+                match &f.params {
+                    dioscript_parser::ast::ParamsType::Variable(v) => {
+                        self.set_var(&v, Value::List(par), &new_scope)?;
+                    }
+                    dioscript_parser::ast::ParamsType::List(v) => {
+                        if v.len() != par.len() {
+                            return Err(RuntimeError::IllegalArgumentsNumber {
+                                need: v.len() as i16,
+                                provided: par.len() as i16,
+                            });
+                        }
+                        for (i, v) in v.iter().enumerate() {
+                            self.set_var(v, par.get(i).unwrap().clone(), &new_scope)?;
+                        }
+                    }
+                }
+                let result = self.execute_scope(f.inner, &new_scope)?;
+                return Ok(result);
+            }
+            types::FunctionType::BindFunction((f, need_param_num)) => {
+                if need_param_num != -1 && (par.len() as i32) != need_param_num {
+                    return Err(RuntimeError::IllegalArgumentsNumber {
+                        need: need_param_num as i16,
+                        provided: par.len() as i16,
+                    });
+                }
+                let mut none = Value::None;
+                return Ok(f(self, par));
             }
         }
     }
@@ -392,6 +455,7 @@ impl Runtime {
     ) -> Result<Value, RuntimeError> {
         match expr {
             CalcExpr::Value(v) => Ok(self.to_value(v, current_scope)?),
+            CalcExpr::LinkExpr(v) => Ok(self.execute_link_expr(v, current_scope)?),
             CalcExpr::Add(l, r) => {
                 let l = self.execute_calculate(*l, current_scope)?;
                 let r = self.execute_calculate(*r, current_scope)?;
@@ -456,11 +520,135 @@ impl Runtime {
         }
     }
 
-    fn get_scope(
-        &self,
-        name: &str,
+    fn execute_link_expr(
+        &mut self,
+        v: LinkExpr,
         current_scope: &NodeId,
-    ) -> Result<(NodeId, &ScopeType), RuntimeError> {
+    ) -> Result<Value, RuntimeError> {
+        let mut this = self.to_value(v.this, current_scope)?;
+        let list = v.list;
+        for op in list {
+            match op {
+                dioscript_parser::parser::LinkExprPart::Field(field) => {
+                    this = self.deref_value(this.clone(), current_scope)?;
+                    match &this {
+                        Value::List(list) => {
+                            let index = field.parse::<usize>();
+                            if let Ok(index) = index {
+                                if list.len() - 1 >= index {
+                                    this = list.get(index).unwrap().clone();
+                                } else {
+                                    return Err(RuntimeError::UnknownAttribute {
+                                        attr: field,
+                                        value: this.value_name(),
+                                    });
+                                }
+                            } else {
+                                return Err(RuntimeError::UnknownAttribute {
+                                    attr: field,
+                                    value: this.value_name(),
+                                });
+                            }
+                        }
+                        Value::Dict(dict) => {
+                            if dict.contains_key(&field) {
+                                this = dict.get(&field).unwrap().clone();
+                            } else {
+                                return Err(RuntimeError::UnknownAttribute {
+                                    attr: field,
+                                    value: this.value_name(),
+                                });
+                            }
+                        }
+                        Value::Tuple(tuple) => match field.as_str() {
+                            "0" => {
+                                this = *tuple.0.clone();
+                            }
+                            "1" => {
+                                this = *tuple.1.clone();
+                            }
+                            _ => {
+                                return Err(RuntimeError::UnknownAttribute {
+                                    attr: field,
+                                    value: this.value_name(),
+                                });
+                            }
+                        },
+                        Value::Element(element) => match field.as_str() {
+                            "name" => {
+                                this = Value::String(element.name.clone());
+                            }
+                            "attributes" => {
+                                this = Value::Dict(element.attributes.clone());
+                            }
+                            "content" => {
+                                let mut content = vec![];
+                                for i in &element.content {
+                                    match i {
+                                        ElementContentType::Children(c) => {
+                                            content.push(Value::Element(c.clone()));
+                                        }
+                                        ElementContentType::Content(c) => {
+                                            content.push(Value::String(c.clone()));
+                                        }
+                                    }
+                                }
+                                this = Value::List(content);
+                            }
+                            _ => {
+                                return Err(RuntimeError::UnknownAttribute {
+                                    attr: field,
+                                    value: this.value_name(),
+                                });
+                            }
+                        },
+                        _ => {
+                            return Err(RuntimeError::UnknownAttribute {
+                                attr: field,
+                                value: this.value_name(),
+                            });
+                        }
+                    }
+                }
+                dioscript_parser::parser::LinkExprPart::FunctionCall(call) => {
+                    let root_scope = self.root_scope.clone();
+                    match &this {
+                        Value::String(content) => {
+                            let mut pararms = vec![Value::String(content.to_string())];
+                            for i in call.arguments {
+                                let v = self.to_value(i, &current_scope)?;
+                                pararms.push(v);
+                            }
+                            let v = self.get_var("string", &root_scope)?.1;
+                            let v = self.deref_value(v, current_scope)?;
+                            if let Value::Dict(v) = v {
+                                if let Some(Value::Function(f)) = v.get(&call.name) {
+                                    this = self.execute_function_by_ft(
+                                        f.clone(),
+                                        pararms,
+                                        current_scope,
+                                    )?;
+                                }
+                            }
+                        }
+                        Value::Number(_) => todo!(),
+                        Value::Boolean(_) => todo!(),
+                        Value::List(_) => todo!(),
+                        Value::Dict(_) => todo!(),
+                        Value::Tuple(_) => todo!(),
+                        Value::Element(_) => todo!(),
+                        Value::Function(_) => todo!(),
+                        _ => {
+                            unimplemented!()
+                        }
+                    }
+                }
+            }
+        }
+        Ok(self.deref_value(this, current_scope)?)
+    }
+
+    fn get_var(&self, name: &str, current_scope: &NodeId) -> Result<(NodeId, Value), RuntimeError> {
         if let Some(ref_scope) = self.vars.get(name) {
             if let Ok(ref_node) = self.scope.get(ref_scope) {
                 let mut flag = false;
@@ -480,7 +668,9 @@ impl Runtime {
                 }
                 if flag {
                     let data = ref_node.data();
-                    return Ok((ref_node_id.clone(), data));
+                    if let ScopeType::Variable(v) = data {
+                        return Ok((ref_node_id.clone(), v.value.clone()));
+                    }
                 }
             }
         }
@@ -489,56 +679,157 @@ impl Runtime {
         })
     }
 
-    fn get_ref(
-        &self,
-        name: &str,
-        current_scope: &NodeId,
-    ) -> Result<(NodeId, VariableType), RuntimeError> {
-        let v = self.get_scope(name, current_scope);
-        if let Ok((i, ScopeType::Variable(v))) = v {
-            return Ok((i, v.clone()));
-        }
-        Err(RuntimeError::VariableNotFound {
-            name: name.to_string(),
-        })
-    }
-
-    fn set_scope(
+    fn get_mut_var(
         &mut self,
         name: &str,
-        value: VariableType,
         current_scope: &NodeId,
-    ) -> Result<NodeId, RuntimeError> {
-        if let Some(scope) = self.vars.get(name) {
-            let vars = self.scope.get_mut(scope)?.data_mut();
-            if let VariableType::Value(to) = value {
-                if let ScopeType::Variable(VariableType::Value(v)) = vars {
-                    v.value = to.value;
-                    v.counter += 1;
+    ) -> Result<&mut Value, RuntimeError> {
+        if let Some(ref_scope) = self.vars.get(name) {
+            if let Ok(ref_node) = self.scope.get(ref_scope) {
+                let mut flag = false;
+                let ref_node_id = ref_node.parent().unwrap();
+                let mut curr_node_id = current_scope;
+
+                loop {
+                    if curr_node_id == ref_node_id {
+                        flag = true;
+                        break;
+                    }
+                    if let Some(v) = self.scope.get(curr_node_id)?.parent() {
+                        curr_node_id = v;
+                    } else {
+                        break;
+                    }
+                }
+                if flag {
+                    let ref_node = self.scope.get_mut(ref_scope)?;
+                    if let ScopeType::Variable(v) = ref_node.data_mut() {
+                        return Ok(&mut v.value);
+                    }
                 }
             }
-            return Ok(scope.clone());
-        } else {
-            let new_scope = self.scope.insert(
-                Node::new(ScopeType::Variable(value)),
-                id_tree::InsertBehavior::UnderNode(current_scope),
-            )?;
-            self.vars.insert(name.to_string(), new_scope.clone());
-            return Ok(new_scope);
         }
+        Err(RuntimeError::VariableNotFound {
+            name: name.to_string(),
+        })
     }
 
-    fn set_ref(
+    fn get_mut_var_by_id(
+        &mut self,
+        id: &NodeId,
+        current_scope: &NodeId,
+    ) -> Result<&mut Value, RuntimeError> {
+        let ref_node = self.scope.get(&id)?;
+
+        let mut flag = false;
+        let ref_node_id = ref_node.parent().unwrap();
+        let mut curr_node_id = current_scope;
+
+        loop {
+            if curr_node_id == ref_node_id {
+                flag = true;
+                break;
+            }
+            if let Some(v) = self.scope.get(curr_node_id)?.parent() {
+                curr_node_id = v;
+            } else {
+                break;
+            }
+        }
+        if flag {
+            let ref_node = self.scope.get_mut(&id)?;
+            if let ScopeType::Variable(v) = ref_node.data_mut() {
+                return Ok(&mut v.value);
+            }
+        }
+        Err(RuntimeError::ReferenceNotFound {
+            reference: id.clone(),
+        })
+    }
+
+    fn set_var(
         &mut self,
         name: &str,
         value: Value,
         current_scope: &NodeId,
     ) -> Result<NodeId, RuntimeError> {
-        self.set_scope(
-            name,
-            VariableType::Value(Variable { value, counter: 0 }),
-            current_scope,
-        )
+        let new_node_scope = if let Some(scope) = self.vars.get(name) {
+            let scope = self.scope.get(scope)?.parent().unwrap().clone();
+            scope
+        } else {
+            current_scope.clone()
+        };
+
+        let value = match value {
+            Value::List(list) => {
+                let mut result = vec![];
+                for (i, v) in list.iter().enumerate() {
+                    if let Value::Reference(_) = v {
+                        // ignore
+                        result.push(v.clone());
+                    } else {
+                        let name = format!("{name}[{i}]");
+                        let id = self.set_var(&name, v.clone(), &new_node_scope)?;
+                        result.push(Value::Reference(id));
+                    }
+                }
+                Value::List(result)
+            }
+            Value::Dict(dict) => {
+                let mut result = HashMap::new();
+                for (k, v) in dict {
+                    if let Value::Reference(_) = v {
+                        // ignore
+                        result.insert(k, v);
+                    } else {
+                        let name = format!("{name}[{k}]");
+                        let id = self.set_var(&name, v.clone(), &new_node_scope)?;
+                        result.insert(k, Value::Reference(id));
+                    }
+                }
+                Value::Dict(result)
+            }
+            Value::Tuple(tuple) => {
+                let first = {
+                    if let Value::Reference(_) = *tuple.0.clone() {
+                        // ignore
+                        Box::new(*tuple.0)
+                    } else {
+                        let name = format!("{name}[0]");
+                        let id = self.set_var(&name, *tuple.0, &new_node_scope)?;
+                        Box::new(Value::Reference(id))
+                    }
+                };
+                let second = {
+                    if let Value::Reference(_) = *tuple.1.clone() {
+                        // ignore
+                        Box::new(*tuple.1)
+                    } else {
+                        let name = format!(".{name}.1");
+                        let id = self.set_var(&name, *tuple.1, current_scope)?;
+                        Box::new(Value::Reference(id))
+                    }
+                };
+                Value::Tuple((first, second))
+            }
+            _ => value,
+        };
+        let scope = if let Some(scope) = self.vars.get(name) {
+            let vars = self.scope.get_mut(scope)?.data_mut();
+            if let ScopeType::Variable(v) = vars {
+                v.value = value;
+                v.counter += 1;
+            }
+            scope.clone()
+        } else {
+            let new_scope = self.scope.insert(
+                Node::new(ScopeType::Variable(Variable { value, counter: 0 })),
+                id_tree::InsertBehavior::UnderNode(current_scope),
+            )?;
+            self.vars.insert(name.to_string(), new_scope.clone());
+            new_scope
+        };
+        return Ok(scope);
     }
 
     fn get_from_index(&self, value: Value, index: Value) -> Result<Value, RuntimeError> {
@@ -626,7 +917,7 @@ impl Runtime {
         }
     }
 
-    fn execute_element(
+    fn to_element(
         &mut self,
         element: AstElement,
         current_scope: &NodeId,
@@ -641,7 +932,7 @@ impl Runtime {
         for i in element.content {
             match i {
                 AstElementContentType::Children(v) => {
-                    let executed_element = self.execute_element(v, current_scope)?;
+                    let executed_element = self.to_element(v, current_scope)?;
                     content.push(ElementContentType::Children(executed_element));
                 }
                 AstElementContentType::Content(v) => {
@@ -713,7 +1004,7 @@ impl Runtime {
                             let iter = self.to_value(iter, current_scope)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
-                                    self.set_ref(&var, i.clone(), &sub_scope)?;
+                                    self.set_var(&var, i.clone(), &sub_scope)?;
                                     let temp = self.execute_scope(v.inner.clone(), &sub_scope)?;
                                     if let Value::Tuple((k, v)) = &temp {
                                         if let Value::String(k) = *k.clone() {
@@ -755,12 +1046,12 @@ impl Runtime {
 
 pub enum ScopeType {
     Block,
-    Variable(VariableType),
+    Variable(Variable),
 }
 
 impl ScopeType {
     pub fn as_variable(&self) -> Option<Variable> {
-        if let Self::Variable(VariableType::Value(r)) = self {
+        if let Self::Variable(r) = self {
             return Some(r.clone());
         }
         None
@@ -771,15 +1062,4 @@ impl ScopeType {
 pub struct Variable {
     pub value: Value,
     pub counter: u32,
-}
-
-#[derive(Debug, Clone)]
-pub enum VariableType {
-    Value(Variable),
-    BindFunction((function::Function, i32)),
-}
-
-pub enum FunctionType {
-    RSF((function::Function, i32)),
-    DSF(FunctionDefine),
 }

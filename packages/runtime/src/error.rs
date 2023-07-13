@@ -46,9 +46,12 @@ pub enum RuntimeError {
     #[error("you must use a variable to receive anonymous function.")]
     AnonymousFunctionInRoot,
 
-    #[error("you are trying to call meta bind function.")]
-    CallMeatBindFunction,
-
     #[error("cannot find bind function location: `{func}`.")]
     BindFunctionNotFound { func: String },
+
+    #[error("cannot find reference: {reference:?}.")]
+    ReferenceNotFound { reference: id_tree::NodeId },
+
+    #[error("unknown attribute `{attr}` for `{value}` data.")]
+    UnknownAttribute { attr: String, value: String },
 }

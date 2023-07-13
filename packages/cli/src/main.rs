@@ -97,6 +97,7 @@ pub fn main() {
             let mut record = String::new();
             let mut code_buffer: Vec<_> = Vec::new();
             let mut readline = rustyline::DefaultEditor::new().expect("init stdin failed.");
+            let mut runtime = dioscript_runtime::Runtime::new();
             loop {
                 let input = readline.readline(">> ").unwrap();
                 if input == ".execute" || input == "." {
@@ -104,7 +105,6 @@ pub fn main() {
                     let ast = dioscript_parser::ast::DioscriptAst::from_string(&code);
                     match ast {
                         Ok(ast) => {
-                            let mut runtime = dioscript_runtime::Runtime::new();
                             let result = runtime.execute_ast(ast);
                             match result {
                                 Ok(r) => {
@@ -142,6 +142,8 @@ pub fn main() {
                         "\n🚀 {}\n",
                         "deleted all recorded code line.".yellow().bold()
                     );
+                } else if input == ".trace" || input == ".t" {
+                    runtime.trace();
                 } else if input == ".save" || input == ".s" {
                     let file = PathBuf::from("./playground.ds");
                     let mut output = File::create(file).unwrap();
