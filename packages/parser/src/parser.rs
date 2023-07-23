@@ -17,7 +17,7 @@ use nom::{
 use crate::{
     ast::{
         ConditionalStatement, DioAstStatement, FunctionCall, FunctionDefine, LoopStatement,
-        ParamsType,
+        ObjectDefine, ParamsType,
     },
     element::{AstElement, AstElementContentType},
     types::AstValue,
@@ -493,6 +493,59 @@ impl StatementParser {
     }
 }
 
+struct ObjectParser;
+impl ObjectParser {
+    fn parse_class(message: &str) -> IResult<&str, ObjectDefine> {
+        context(
+            "object",
+            map(
+                pair(
+                    delimited(
+                        pair(tag("class"), space1),
+                        VariableParser::parse_var_name,
+                        delimited(space0, tag("{"), multispace0),
+                    ),
+                    terminated(
+                        many0(delimited(
+                            multispace0,
+                            alt((
+                                map(FunctionParser::define, |v| ObjectInnerType::Method(v)),
+                                map(VariableParser::parse, |v| ObjectInnerType::Variable(v)),
+                            )),
+                            multispace0,
+                        )),
+                        pair(multispace0, tag("}")),
+                    ),
+                ),
+                |(name, value): (String, Vec<ObjectInnerType>)| {
+                    let mut methods = vec![];
+                    let mut variables = vec![];
+                    for i in value {
+                        match i {
+                            ObjectInnerType::Method(m) => {
+                                methods.push(m);
+                            }
+                            ObjectInnerType::Variable(v) => {
+                                variables.push(v);
+                            }
+                        }
+                    }
+                    ObjectDefine {
+                        name,
+                        methods,
+                        variables,
+                    }
+                },
+            ),
+        )(message)
+    }
+}
+
+enum ObjectInnerType {
+    Method(FunctionDefine),
+    Variable((String, CalcExpr)),
+}
+
 struct ElementParser;
 impl ElementParser {
     fn parse_element_name(message: &str) -> IResult<&str, &str> {
@@ -638,6 +691,9 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
                 }),
                 map(FunctionParser::define, |v| {
                     DioAstStatement::FunctionDefine(v)
+                }),
+                map(ObjectParser::parse_class, |v| {
+                    DioAstStatement::ObjectDefine(v)
                 }),
             )),
             multispace0,

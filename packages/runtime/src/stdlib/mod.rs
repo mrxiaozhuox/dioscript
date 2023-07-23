@@ -33,6 +33,11 @@ pub mod root {
         format!("{}", body)
     }
 
+    pub fn type_name(_: &mut Runtime, args: Vec<Value>) -> Value {
+        let name = args.get(0).unwrap().value_name();
+        return Value::String(name);
+    }
+
     pub fn execute(rt: &mut Runtime, args: Vec<Value>) -> Value {
         let value = args.get(0).unwrap();
         if let Value::String(v) = value {
@@ -60,6 +65,8 @@ pub mod root {
 
         exporter.insert("print", (print, -1));
         exporter.insert("println", (println, -1));
+
+        exporter.insert("type", (type_name, 1));
 
         exporter.insert("execute", (execute, -1));
         exporter.insert("import", (import, 1));
@@ -108,6 +115,16 @@ mod string {
         Value::String(this.to_uppercase())
     }
 
+    pub fn split(_rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let this = args.get(0).unwrap().as_string().unwrap();
+        let sep = args.get(1).unwrap().as_string().unwrap();
+        let result = this
+            .split(&sep)
+            .map(|v| Value::String(v.to_string()))
+            .collect::<Vec<Value>>();
+        Value::List(result)
+    }
+
     pub fn export() -> (
         crate::function::BindTarget,
         HashMap<std::string::String, Value>,
@@ -123,6 +140,8 @@ mod string {
         exporter.insert("lowercase", (lowercase, 1));
         exporter.insert("uppercase", (uppercase, 1));
 
+        exporter.insert("split", (split, 2));
+
         exporter.collect()
     }
 }
@@ -137,6 +156,20 @@ mod number {
         HashMap<std::string::String, Value>,
     ) {
         let mut exporter = MethodBinder::new(crate::function::BindTarget::Number);
+        exporter.collect()
+    }
+}
+
+mod boolean {
+    use std::collections::HashMap;
+
+    use crate::{function::MethodBinder, types::Value};
+
+    pub fn export() -> (
+        crate::function::BindTarget,
+        HashMap<std::string::String, Value>,
+    ) {
+        let mut exporter = MethodBinder::new(crate::function::BindTarget::Boolean);
         exporter.collect()
     }
 }

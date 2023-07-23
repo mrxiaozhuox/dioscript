@@ -42,6 +42,7 @@ pub enum DioAstStatement {
     LineComment(String),
     FunctionCall(FunctionCall),
     FunctionDefine(FunctionDefine),
+    ObjectDefine(ObjectDefine),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +56,13 @@ pub struct FunctionDefine {
     pub name: Option<String>,
     pub params: ParamsType,
     pub inner: Vec<DioAstStatement>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjectDefine {
+    pub name: String,
+    pub methods: Vec<FunctionDefine>,
+    pub variables: Vec<(String, CalcExpr)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

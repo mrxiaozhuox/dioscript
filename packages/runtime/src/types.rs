@@ -16,6 +16,7 @@ pub enum Value {
     Element(Element),
     Function(FunctionType),
     Reference(id_tree::NodeId),
+    Object(Object),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +38,7 @@ impl ToString for Value {
             Value::Element(_) => "element { /* element attributes */  }".to_string(),
             Value::Function(_) => "fn () { /* function impl */  }".to_string(),
             Value::Reference(_) => "/* &reference */".to_string(),
+            Value::Object(_) => "object { /* object */ }".to_string(),
         }
     }
 }
@@ -54,6 +56,7 @@ impl Value {
             Value::Element(_) => "element",
             Value::Function(_) => "function",
             Value::Reference(_) => "reference",
+            Value::Object(_) => "object",
         }
         .to_string()
     }
@@ -283,4 +286,10 @@ impl Element {
         let result = format!("<{tag}{attr_str}>{content_str}</{tag}>", tag = self.name);
         result
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Object {
+    pub prototype: dioscript_parser::ast::ObjectDefine,
+    pub variables: HashMap<String, Value>,
 }

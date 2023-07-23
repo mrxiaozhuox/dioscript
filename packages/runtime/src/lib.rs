@@ -5,7 +5,8 @@ use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use dioscript_parser::{
     ast::{
-        CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine, LoopExecuteType,
+        CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine,
+        LoopExecuteType, ObjectDefine,
     },
     element::{AstElement, AstElementContentType},
     parser::{CalcExpr, LinkExpr},
@@ -27,6 +28,8 @@ pub struct Runtime {
     root_scope: NodeId,
     // function handle scope tree id.
     function_caller_scope: NodeId,
+    // object prototype.
+    objects: HashMap<String, ObjectDefine>,
 }
 
 impl Runtime {
@@ -48,6 +51,7 @@ impl Runtime {
             scope,
             root_scope: root,
             function_caller_scope: func_scope,
+            objects: HashMap::new(),
         };
 
         this.setup().expect("Runtime setup failed.");
@@ -226,6 +230,9 @@ impl Runtime {
                     if f.0.is_none() {
                         return Err(RuntimeError::AnonymousFunctionInRoot);
                     }
+                }
+                DioAstStatement::ObjectDefine(object) => {
+                    self.objects.insert(object.name.clone(), object);
                 }
                 _ => {}
             }
@@ -406,7 +413,7 @@ impl Runtime {
         &mut self,
         func: FunctionType,
         par: Vec<Value>,
-        current_scope: &NodeId,
+        _current_scope: &NodeId,
     ) -> Result<Value, RuntimeError> {
         let runtime_scope = self.function_caller_scope.clone();
         match func {
@@ -442,7 +449,6 @@ impl Runtime {
                         provided: par.len() as i16,
                     });
                 }
-                let mut none = Value::None;
                 return Ok(f(self, par));
             }
         }
