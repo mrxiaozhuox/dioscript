@@ -12,7 +12,7 @@ use dioscript_parser::{
     parser::{CalcExpr, LinkExpr},
     types::AstValue,
 };
-use module::ModuleItem;
+use module::{ModuleItem, ModuleGenerator};
 use types::{Element, ElementContentType, FunctionType, Value};
 
 pub mod error;
@@ -80,6 +80,10 @@ impl Runtime {
 
     pub fn trace(&self) {
         println!("{:#?}", self.vars);
+    }
+
+    pub fn bind_module(&mut self, name: &str, module: ModuleGenerator) {
+        self.modules.insert(name.to_string(), module.to_module_item());
     }
 
     pub fn add_script_function(

@@ -39,12 +39,10 @@ pub mod root {
         if let Value::String(v) = value {
             return match rt.execute(&v) {
                 Ok(result) => result,
-                Err(err) => {
-                    Value::Tuple((
-                        Box::from(Value::String("error".to_string())),
-                        Box::from(Value::String(err.to_string()))
-                    ))
-                },
+                Err(err) => Value::Tuple((
+                    Box::from(Value::String("error".to_string())),
+                    Box::from(Value::String(err.to_string())),
+                )),
             };
         }
         Value::None
@@ -63,7 +61,7 @@ pub mod root {
 }
 
 mod string {
-    use crate::{types::Value, Runtime, module::ModuleGenerator};
+    use crate::{module::ModuleGenerator, types::Value, Runtime};
 
     pub fn join(_rt: &mut Runtime, mut args: Vec<Value>) -> Value {
         let this = args.get(0).unwrap().as_string().unwrap();
@@ -128,54 +126,33 @@ mod string {
         module
     }
 }
-//
-// mod number {
-//     use std::collections::HashMap;
-//
-//     use crate::{function::MethodBinder, types::Value};
-//
-//     pub fn export() -> (
-//         crate::function::BindTarget,
-//         HashMap<std::string::String, Value>,
-//     ) {
-//         let mut exporter = MethodBinder::new(crate::function::BindTarget::Number);
-//         exporter.collect()
-//     }
-// }
-//
-// mod boolean {
-//     use std::collections::HashMap;
-//
-//     use crate::{function::MethodBinder, types::Value};
-//
-//     pub fn export() -> (
-//         crate::function::BindTarget,
-//         HashMap<std::string::String, Value>,
-//     ) {
-//         let mut exporter = MethodBinder::new(crate::function::BindTarget::Boolean);
-//         exporter.collect()
-//     }
-// }
-//
-// pub fn all() -> Vec<(crate::function::BindTarget, HashMap<String, Value>)> {
-//     let mut result = vec![];
-//     result.push(root::export());
-//     result.push(string::export());
-//     result
-// }
-//
+
+mod number {
+
+    use crate::{module::ModuleGenerator, types::Value, Runtime};
+
+    pub fn abs(_rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let num = args.get(0).unwrap().as_number().unwrap();
+        Value::Number(num.abs())
+    }
+
+    pub fn export() -> ModuleGenerator {
+        let mut module = ModuleGenerator::new();
+        
+        module.insert_rusty_function("abs", abs, 1);
+        
+        module
+    }
+}
+
 pub fn std() -> ModuleGenerator {
     let mut export = root::export();
     export.insert_sub_module("string", string::export());
+    export.insert_sub_module("number", number::export());
     export
 }
 
 pub fn auto_use() -> Vec<String> {
-    let v = vec![
-        "std::print",
-        "std::println",
-        "std::type",
-        "std::execute",
-    ];
+    let v = vec!["std::print", "std::println", "std::type", "std::execute"];
     v.iter().map(|v| v.to_string()).collect()
 }

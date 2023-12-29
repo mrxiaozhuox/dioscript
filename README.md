@@ -41,18 +41,11 @@ fn element_to_html(args: Vec<Value>) -> Value {
 }
 
 // import function
-runtime.add_function(
-    // namespace
-    vec!["std".to_string(), "value".to_string()], 
-    // function name
-    "to_html", 
-    (
-        // function closure
-        |v| { element_to_html(v) },
-        // arguments number limit
-        1,
-    )
-);
+runtime.bind_module("html", {
+    let mut module = ModuleGenerator::new();
+    module.insert_rusty_function("to_html", element_to_html, 1);
+    module
+});
 
 ```
 
@@ -62,7 +55,7 @@ e = div {
     p { "Hello Dioscropt" }
 };
 
-return std::value::to_html(e);
+return html::to_html(e);
 
 // result
 // <div class="main"><p>Hello Dioscript</p></div>
