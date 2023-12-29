@@ -4,4 +4,6 @@ members = [
   "packages/runtime",
   "packages/cli",
   "packages/dsx",
+  "packages/playground"
 ]
+resolver = "2"
