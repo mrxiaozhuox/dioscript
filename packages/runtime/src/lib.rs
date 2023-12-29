@@ -5,17 +5,18 @@ use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use dioscript_parser::{
     ast::{
-        CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine,
-        LoopExecuteType, ObjectDefine,
+        CalculateMark, DioAstStatement, DioscriptAst, FunctionCall, FunctionDefine, FunctionName,
+        LoopExecuteType,
     },
     element::{AstElement, AstElementContentType},
     parser::{CalcExpr, LinkExpr},
     types::AstValue,
 };
+use module::ModuleItem;
 use types::{Element, ElementContentType, FunctionType, Value};
 
 pub mod error;
-pub mod function;
+pub mod module;
 pub mod stdlib;
 pub mod types;
 
@@ -28,8 +29,10 @@ pub struct Runtime {
     root_scope: NodeId,
     // function handle scope tree id.
     function_caller_scope: NodeId,
-    // object prototype.
-    objects: HashMap<String, ObjectDefine>,
+    // module included.
+    modules: HashMap<String, module::ModuleItem>,
+    // namespace using list
+    namespace_use: HashMap<String, Vec<String>>,
 }
 
 impl Runtime {
@@ -51,7 +54,8 @@ impl Runtime {
             scope,
             root_scope: root,
             function_caller_scope: func_scope,
-            objects: HashMap::new(),
+            modules: Default::default(),
+            namespace_use: Default::default(),
         };
 
         this.setup().expect("Runtime setup failed.");
@@ -60,33 +64,15 @@ impl Runtime {
     }
 
     fn setup(&mut self) -> Result<(), RuntimeError> {
-        let scope = self.root_scope.clone();
+        // let scope = self.root_scope.clone();
 
-        let mut types: HashMap<String, HashMap<String, Value>> = HashMap::new();
+        let mut module_exporter = HashMap::new();
+        module_exporter.insert("std".to_string(), stdlib::std().to_module_item());
+        self.modules = module_exporter;
 
-        let functions = crate::stdlib::all();
-        println!("{:?}", functions);
-        for (target, list) in functions {
-            match target {
-                function::BindTarget::Root => {
-                    for (name, val) in list {
-                        self.set_var(&name, val, &scope)?;
-                    }
-                }
-                _ => {
-                    let target_name = target.to_string();
-                    if types.contains_key(&target_name) {
-                        let temp = types.get_mut(&target_name).unwrap();
-                        let _ = list.into_iter().map(|(k, v)| temp.insert(k, v));
-                    } else {
-                        types.insert(target_name, list);
-                    }
-                }
-            }
-        }
-
-        for (name, data) in types {
-            self.set_var(&name, Value::Dict(data), &scope)?;
+        for path in stdlib::auto_use() {
+            let temp: Vec<String> = path.split("::").into_iter().map(|v| v.to_string()).collect();
+            self.namespace_use.insert(temp.last().unwrap().to_string(), temp);
         }
 
         Ok(())
@@ -105,18 +91,15 @@ impl Runtime {
             let root_scope = self.root_scope.clone();
             let new_scope = self.set_var(
                 &name,
-                Value::Function(types::FunctionType::DefineFunction(func.clone())),
+                Value::Function(types::FunctionType::DScript(func.clone())),
                 &root_scope,
             )?;
             Ok((
                 Some(new_scope),
-                Value::Function(types::FunctionType::DefineFunction(func)),
+                Value::Function(types::FunctionType::DScript(func)),
             ))
         } else {
-            Ok((
-                None,
-                Value::Function(types::FunctionType::DefineFunction(func)),
-            ))
+            Ok((None, Value::Function(types::FunctionType::DScript(func))))
         }
     }
 
@@ -143,6 +126,11 @@ impl Runtime {
                 break;
             }
             match v {
+                DioAstStatement::ModuleUse(u) => {
+                    let u = u.0;
+                    let last = u.last().unwrap();
+                    self.namespace_use.insert(last.to_string(), u.clone());
+                }
                 DioAstStatement::VariableAss(var) => {
                     let name = var.0.clone();
                     let value = var.1.clone();
@@ -231,9 +219,6 @@ impl Runtime {
                         return Err(RuntimeError::AnonymousFunctionInRoot);
                     }
                 }
-                DioAstStatement::ObjectDefine(object) => {
-                    self.objects.insert(object.name.clone(), object);
-                }
                 _ => {}
             }
         }
@@ -285,7 +270,7 @@ impl Runtime {
                 Ok(data)
             }
             AstValue::FunctionDefine(define) => {
-                Ok(Value::Function(types::FunctionType::DefineFunction(define)))
+                Ok(Value::Function(types::FunctionType::DScript(define)))
             }
         }
     }
@@ -357,17 +342,10 @@ impl Runtime {
             par.push(v);
         }
 
-        let func = {
-            let mut result = None;
-            let info = self.get_var(&name, current_scope)?.1;
-            if let Value::Function(f) = info {
-                result = Some(f);
-            }
-            result
-        };
+        let func = self.get_function(name, current_scope)?;
 
         match func {
-            Some(types::FunctionType::DefineFunction(f)) => {
+            types::FunctionType::DScript(f) => {
                 let f = f.clone();
                 let new_scope = self.scope.insert(
                     Node::new(ScopeType::Block),
@@ -392,7 +370,7 @@ impl Runtime {
                 let result = self.execute_scope(f.inner, &new_scope)?;
                 return Ok(result);
             }
-            Some(types::FunctionType::BindFunction((f, need_param_num))) => {
+            types::FunctionType::Rusty((f, need_param_num)) => {
                 if need_param_num != -1 && (par.len() as i32) != need_param_num {
                     return Err(RuntimeError::IllegalArgumentsNumber {
                         need: need_param_num as i16,
@@ -400,11 +378,6 @@ impl Runtime {
                     });
                 }
                 return Ok(f(self, par));
-            }
-            None => {
-                return Err(RuntimeError::FunctionNotFound {
-                    name: name.to_string(),
-                });
             }
         }
     }
@@ -417,7 +390,7 @@ impl Runtime {
     ) -> Result<Value, RuntimeError> {
         let runtime_scope = self.function_caller_scope.clone();
         match func {
-            types::FunctionType::DefineFunction(f) => {
+            types::FunctionType::DScript(f) => {
                 let f = f.clone();
                 let new_scope = self.scope.insert(
                     Node::new(ScopeType::Block),
@@ -442,7 +415,7 @@ impl Runtime {
                 let result = self.execute_scope(f.inner, &new_scope)?;
                 return Ok(result);
             }
-            types::FunctionType::BindFunction((f, need_param_num)) => {
+            types::FunctionType::Rusty((f, need_param_num)) => {
                 if need_param_num != -1 && (par.len() as i32) != need_param_num {
                     return Err(RuntimeError::IllegalArgumentsNumber {
                         need: need_param_num as i16,
@@ -452,6 +425,95 @@ impl Runtime {
                 return Ok(f(self, par));
             }
         }
+    }
+
+    fn get_function(
+        &self,
+        name: FunctionName,
+        current_scope: &NodeId,
+    ) -> Result<FunctionType, RuntimeError> {
+        match name {
+            FunctionName::Single(name) => {
+                let info = self.get_var(&name, current_scope);
+                if let Ok((_, Value::Function(f))) = info {
+                    Ok(f)
+                } else {
+                    let function = self.get_module_value(vec![name.clone()]);
+                    if let Ok(ModuleItem::Function(f)) = function {
+                        Ok(f)
+                    } else {
+                        Err(RuntimeError::FunctionNotFound { name })
+                    }
+                }
+            }
+            FunctionName::Namespace(namespace) => {
+                let v = self.get_module_value(namespace.clone())?;
+                if let ModuleItem::Function(f) = v {
+                    Ok(f)
+                } else {
+                    Err(RuntimeError::FunctionNotFound {
+                        name: namespace.join("::"),
+                    })
+                }
+            }
+        }
+    }
+
+    fn get_module_value(&self, mut namespace: Vec<String>) -> Result<ModuleItem, RuntimeError> {
+        let data = self.load_from_module(namespace.clone());
+        match data {
+            Ok(v) => {
+                return Ok(v);
+            }
+            Err(_) => {
+                let v = self.namespace_use.get(&namespace[0]);
+                if let Some(used) = v {
+                    if used.last().unwrap() == &namespace[0] {
+                        namespace.remove(0);
+                    }
+                    let module_path = used.iter().chain(namespace.iter()).cloned().collect();
+                    let v = self.load_from_module(module_path)?;
+                    return Ok(v);
+                } else {
+                    return Err(RuntimeError::ModuleNotFound {
+                        module: namespace[0].to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    fn load_from_module(&self, namespace: Vec<String>) -> Result<ModuleItem, RuntimeError> {
+        let map = &self.modules;
+        let mut cur_item: ModuleItem = map
+            .get(&namespace[0])
+            .ok_or(RuntimeError::ModuleNotFound {
+                module: namespace[0].to_string(),
+            })?
+            .clone();
+
+        for ns in &namespace[1..] {
+            match cur_item {
+                ModuleItem::SubModule(sub_info) => {
+                    let sub_map = sub_info.0;
+                    cur_item = sub_map
+                        .get(ns)
+                        .ok_or(RuntimeError::ModulePartNotFound {
+                            part: ns.to_string(),
+                            module: namespace[0].to_string(),
+                        })?
+                        .clone();
+                }
+                _ => {
+                    return Err(RuntimeError::ModulePartNotFound {
+                        part: ns.to_string(),
+                        module: namespace[0].to_string(),
+                    })
+                }
+            }
+        }
+        let r = cur_item.clone();
+        Ok(r)
     }
 
     fn execute_calculate(
@@ -628,7 +690,7 @@ impl Runtime {
                             let v = self.get_var("string", &root_scope)?.1;
                             let v = self.deref_value(v, current_scope)?;
                             if let Value::Dict(v) = v {
-                                if let Some(Value::Function(f)) = v.get(&call.name) {
+                                if let Some(Value::Function(f)) = v.get(&call.name.as_single()) {
                                     this = self.execute_function_by_ft(
                                         f.clone(),
                                         pararms,
@@ -685,6 +747,7 @@ impl Runtime {
         })
     }
 
+    #[allow(dead_code)]
     fn get_mut_var(
         &mut self,
         name: &str,

@@ -1,12 +1,8 @@
-use std::collections::HashMap;
-
-use crate::types::Value;
+use crate::module::ModuleGenerator;
 
 pub mod root {
 
-    use std::collections::HashMap;
-
-    use crate::{function::MethodBinder, types::Value, Runtime};
+    use crate::{module::ModuleGenerator, types::Value, Runtime};
 
     pub fn print(_: &mut Runtime, args: Vec<Value>) -> Value {
         print!("{}", iterable_to_str(args));
@@ -41,43 +37,33 @@ pub mod root {
     pub fn execute(rt: &mut Runtime, args: Vec<Value>) -> Value {
         let value = args.get(0).unwrap();
         if let Value::String(v) = value {
-            let result = rt.execute(&v).unwrap();
-            return result;
+            return match rt.execute(&v) {
+                Ok(result) => result,
+                Err(err) => {
+                    Value::Tuple((
+                        Box::from(Value::String("error".to_string())),
+                        Box::from(Value::String(err.to_string()))
+                    ))
+                },
+            };
         }
         Value::None
     }
 
-    pub fn import(_rt: &mut Runtime, args: Vec<Value>) -> Value {
-        let name = args.get(0).unwrap();
-        if let Value::String(name) = name {
-            match name.as_str() {
-                _ => {}
-            }
-        }
-        Value::None
-    }
+    pub fn export() -> ModuleGenerator {
+        let mut module = ModuleGenerator::new();
 
-    pub fn export() -> (
-        crate::function::BindTarget,
-        HashMap<std::string::String, Value>,
-    ) {
-        let mut exporter = MethodBinder::new(crate::function::BindTarget::Root);
+        module.insert_rusty_function("print", print, -1);
+        module.insert_rusty_function("println", println, -1);
+        module.insert_rusty_function("type", type_name, 1);
+        module.insert_rusty_function("execute", execute, -1);
 
-        exporter.insert("print", (print, -1));
-        exporter.insert("println", (println, -1));
-
-        exporter.insert("type", (type_name, 1));
-
-        exporter.insert("execute", (execute, -1));
-        exporter.insert("import", (import, 1));
-        exporter.collect()
+        return module;
     }
 }
 
 mod string {
-    use std::collections::HashMap;
-
-    use crate::{function::MethodBinder, types::Value, Runtime};
+    use crate::{types::Value, Runtime, module::ModuleGenerator};
 
     pub fn join(_rt: &mut Runtime, mut args: Vec<Value>) -> Value {
         let this = args.get(0).unwrap().as_string().unwrap();
@@ -125,58 +111,71 @@ mod string {
         Value::List(result)
     }
 
-    pub fn export() -> (
-        crate::function::BindTarget,
-        HashMap<std::string::String, Value>,
-    ) {
-        let mut exporter = MethodBinder::new(crate::function::BindTarget::String);
+    pub fn export() -> ModuleGenerator {
+        let mut module = ModuleGenerator::new();
 
-        exporter.insert("join", (join, -1));
-        exporter.insert("len", (len, 1));
-        exporter.insert("repeat", (repeat, 2));
+        module.insert_rusty_function("join", join, -1);
+        module.insert_rusty_function("len", len, 1);
+        module.insert_rusty_function("repeat", repeat, 2);
 
-        exporter.insert("is_empty", (is_empty, 1));
+        module.insert_rusty_function("is_empty", is_empty, 1);
 
-        exporter.insert("lowercase", (lowercase, 1));
-        exporter.insert("uppercase", (uppercase, 1));
+        module.insert_rusty_function("lowercase", lowercase, 1);
+        module.insert_rusty_function("uppercase", uppercase, 1);
 
-        exporter.insert("split", (split, 2));
+        module.insert_rusty_function("split", split, 2);
 
-        exporter.collect()
+        module
     }
 }
-
-mod number {
-    use std::collections::HashMap;
-
-    use crate::{function::MethodBinder, types::Value};
-
-    pub fn export() -> (
-        crate::function::BindTarget,
-        HashMap<std::string::String, Value>,
-    ) {
-        let mut exporter = MethodBinder::new(crate::function::BindTarget::Number);
-        exporter.collect()
-    }
+//
+// mod number {
+//     use std::collections::HashMap;
+//
+//     use crate::{function::MethodBinder, types::Value};
+//
+//     pub fn export() -> (
+//         crate::function::BindTarget,
+//         HashMap<std::string::String, Value>,
+//     ) {
+//         let mut exporter = MethodBinder::new(crate::function::BindTarget::Number);
+//         exporter.collect()
+//     }
+// }
+//
+// mod boolean {
+//     use std::collections::HashMap;
+//
+//     use crate::{function::MethodBinder, types::Value};
+//
+//     pub fn export() -> (
+//         crate::function::BindTarget,
+//         HashMap<std::string::String, Value>,
+//     ) {
+//         let mut exporter = MethodBinder::new(crate::function::BindTarget::Boolean);
+//         exporter.collect()
+//     }
+// }
+//
+// pub fn all() -> Vec<(crate::function::BindTarget, HashMap<String, Value>)> {
+//     let mut result = vec![];
+//     result.push(root::export());
+//     result.push(string::export());
+//     result
+// }
+//
+pub fn std() -> ModuleGenerator {
+    let mut export = root::export();
+    export.insert_sub_module("string", string::export());
+    export
 }
 
-mod boolean {
-    use std::collections::HashMap;
-
-    use crate::{function::MethodBinder, types::Value};
-
-    pub fn export() -> (
-        crate::function::BindTarget,
-        HashMap<std::string::String, Value>,
-    ) {
-        let mut exporter = MethodBinder::new(crate::function::BindTarget::Boolean);
-        exporter.collect()
-    }
-}
-
-pub fn all() -> Vec<(crate::function::BindTarget, HashMap<String, Value>)> {
-    let mut result = vec![];
-    result.push(root::export());
-    result.push(string::export());
-    result
+pub fn auto_use() -> Vec<String> {
+    let v = vec![
+        "std::print",
+        "std::println",
+        "std::type",
+        "std::execute",
+    ];
+    v.iter().map(|v| v.to_string()).collect()
 }

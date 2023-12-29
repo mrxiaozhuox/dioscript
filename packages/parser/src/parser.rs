@@ -17,7 +17,7 @@ use nom::{
 use crate::{
     ast::{
         ConditionalStatement, DioAstStatement, FunctionCall, FunctionDefine, LoopStatement,
-        ObjectDefine, ParamsType,
+        ParamsType, UseStatement, FunctionName,
     },
     element::{AstElement, AstElementContentType},
     types::AstValue,
@@ -285,7 +285,7 @@ impl CalculateParser {
                     separated_list1(
                         delimited(multispace0, tag("."), multispace0),
                         alt((
-                            map(FunctionParser::call, |v| LinkExprPart::FunctionCall(v)),
+                            map(FunctionParser::call_single_name, |v| LinkExprPart::FunctionCall(v)),
                             map(
                                 alt((
                                     VariableParser::parse_var_name,
@@ -379,7 +379,45 @@ impl FunctionParser {
             "function call",
             map(
                 tuple((
-                    terminated(VariableParser::parse_var_name, tag("(")),
+                    terminated(
+                        map(
+                            separated_list1(tag("::"), VariableParser::parse_var_name),
+                            |v| {
+                                if v.len() > 1 {
+                                    FunctionName::Namespace(v)
+                                } else {
+                                    FunctionName::Single(v.get(0).unwrap().to_string())
+                                }
+                            }
+                        ),
+                        tag("(")
+                    ),
+                    delimited(
+                        space0,
+                        separated_list0(tag(","), delimited(space0, TypeParser::parse, space0)),
+                        space0,
+                    ),
+                    tag(")"),
+                )),
+                |(name, arguments, _)| FunctionCall { name, arguments },
+            ),
+        )(message)
+    }
+
+    fn call_single_name(message: &str) -> IResult<&str, FunctionCall> {
+        context(
+            "function call single",
+            map(
+                tuple((
+                    terminated(
+                        map(
+                            VariableParser::parse_var_name,
+                            |v| {
+                                FunctionName::Single(v)
+                            }
+                        ),
+                        tag("(")
+                    ),
                     delimited(
                         space0,
                         separated_list0(tag(","), delimited(space0, TypeParser::parse, space0)),
@@ -493,58 +531,32 @@ impl StatementParser {
     }
 }
 
-struct ObjectParser;
-impl ObjectParser {
-    fn parse_class(message: &str) -> IResult<&str, ObjectDefine> {
+struct ModuleParser;
+impl ModuleParser {
+
+    fn  module_name_style(c: char) -> bool {
+        matches!(c, 'a'..='z' |  '_')
+    }
+
+    fn parse_module_name(message: &str) -> IResult<&str, &str> {
+        context("module name", take_while1(Self::module_name_style))(message)
+    }
+
+    fn parse_use(message: &str) -> IResult<&str, UseStatement> {
         context(
-            "object",
+            "use statement",
             map(
-                pair(
-                    delimited(
-                        pair(tag("class"), space1),
-                        VariableParser::parse_var_name,
-                        delimited(space0, tag("{"), multispace0),
-                    ),
-                    terminated(
-                        many0(delimited(
-                            multispace0,
-                            alt((
-                                map(FunctionParser::define, |v| ObjectInnerType::Method(v)),
-                                map(VariableParser::parse, |v| ObjectInnerType::Variable(v)),
-                            )),
-                            multispace0,
-                        )),
-                        pair(multispace0, tag("}")),
-                    ),
+                delimited(
+                    pair(tag("use"), space1),
+                    separated_list1(tag("::"), Self::parse_module_name),
+                    pair(space0, tag(";"))
                 ),
-                |(name, value): (String, Vec<ObjectInnerType>)| {
-                    let mut methods = vec![];
-                    let mut variables = vec![];
-                    for i in value {
-                        match i {
-                            ObjectInnerType::Method(m) => {
-                                methods.push(m);
-                            }
-                            ObjectInnerType::Variable(v) => {
-                                variables.push(v);
-                            }
-                        }
-                    }
-                    ObjectDefine {
-                        name,
-                        methods,
-                        variables,
-                    }
-                },
-            ),
+                |list| UseStatement(list.iter().map(|v| v.to_string()).collect())
+            )
         )(message)
     }
 }
 
-enum ObjectInnerType {
-    Method(FunctionDefine),
-    Variable((String, CalcExpr)),
-}
 
 struct ElementParser;
 impl ElementParser {
@@ -692,8 +704,8 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
                 map(FunctionParser::define, |v| {
                     DioAstStatement::FunctionDefine(v)
                 }),
-                map(ObjectParser::parse_class, |v| {
-                    DioAstStatement::ObjectDefine(v)
+                map(ModuleParser::parse_use, |v| {
+                    DioAstStatement::ModuleUse(v)
                 }),
             )),
             multispace0,

@@ -37,7 +37,7 @@ pub enum RuntimeError {
         value_type: String,
     },
 
-    #[error("cannot find `{index}` in `{value}` value.")]
+    #[error("cannot find index `{index}` in `{value}` value.")]
     IndexNotFound { index: String, value: String },
 
     #[error("need arguments number `{need}`, provided `{provided}`.")]
@@ -54,4 +54,10 @@ pub enum RuntimeError {
 
     #[error("unknown attribute `{attr}` for `{value}` data.")]
     UnknownAttribute { attr: String, value: String },
+
+    #[error("module: `{module}` not found.")]
+    ModuleNotFound { module: String },
+
+    #[error("cannot find namespace `{part}` in `{module}` module.")]
+    ModulePartNotFound { part: String, module: String },
 }

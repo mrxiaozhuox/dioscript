@@ -42,27 +42,43 @@ pub enum DioAstStatement {
     LineComment(String),
     FunctionCall(FunctionCall),
     FunctionDefine(FunctionDefine),
-    ObjectDefine(ObjectDefine),
+    
+    ModuleUse(UseStatement),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionCall {
-    pub name: String,
+    pub name: FunctionName,
     pub arguments: Vec<AstValue>,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FunctionName {
+    Single(String),
+    Namespace(Vec<String>),
+}
+
+impl ToString for FunctionName {
+    fn to_string(&self) -> String {
+        match self {
+            FunctionName::Single(s) => s.to_string(),
+            FunctionName::Namespace(n) => { n.join("::") },
+        }
+    }
+}
+
+impl FunctionName {
+    pub fn as_single(&self) -> String {
+        self.to_string()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDefine {
     pub name: Option<String>,
     pub params: ParamsType,
     pub inner: Vec<DioAstStatement>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ObjectDefine {
-    pub name: String,
-    pub methods: Vec<FunctionDefine>,
-    pub variables: Vec<(String, CalcExpr)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +99,9 @@ pub struct LoopStatement {
     pub execute_type: LoopExecuteType,
     pub inner: Vec<DioAstStatement>,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseStatement(pub Vec<String>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LoopExecuteType {
