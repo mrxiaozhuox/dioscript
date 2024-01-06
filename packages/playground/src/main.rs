@@ -22,16 +22,19 @@ pub fn App(cx: Scope) -> Element {
             }, 800);
         "}).unwrap()
     });
-    let editor_content = use_state(cx, String::new);
-    use_coroutine(cx,|rx: UnboundedReceiver<String>| {
+    let editor_content = use_state(cx, || {
+        String::from("return div { \"hello dioscript!\" };")
+    });
+    use_coroutine(cx,|_rx: UnboundedReceiver<String>| {
         to_owned![eval, editor_content];
         async move {
+            #[allow(irrefutable_let_patterns)]
             while let v = eval.recv().await {
                 match v {
                     Ok(v) => {
                         editor_content.set(v.as_str().unwrap().to_string());
                     },
-                    Err(e) => {},
+                    Err(_e) => {},
                 }
             }
         }

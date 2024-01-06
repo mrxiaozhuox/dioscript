@@ -21,8 +21,9 @@ pub fn View(cx: Scope, code: String) -> Element {
             })
         }
         Err(e) => {
+            let message = e.to_string();
             cx.render(rsx! {
-                div { "Error: {e:?}" }
+                div { class: "font-semibold", "Error: {message}" }
             })
         },
     }

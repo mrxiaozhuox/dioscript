@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use error::{Error, RuntimeError};
-use id_tree::{Node, NodeId, Tree, TreeBuilder};
 
 use dioscript_parser::{
     ast::{
@@ -12,8 +11,9 @@ use dioscript_parser::{
     parser::{CalcExpr, LinkExpr},
     types::AstValue,
 };
-use module::{ModuleItem, ModuleGenerator};
+use module::{ModuleGenerator, ModuleItem};
 use types::{Element, ElementContentType, FunctionType, Value};
+use uuid::Uuid;
 
 pub mod error;
 pub mod module;
@@ -22,13 +22,9 @@ pub mod types;
 
 pub struct Runtime {
     // variable content: use for save variable node-id.
-    vars: HashMap<String, NodeId>,
+    scopes: Vec<Scope>,
     // scope tree: use for build scope structure.
-    scope: Tree<ScopeType>,
-    // root scope: root tree id.
-    root_scope: NodeId,
-    // function handle scope tree id.
-    function_caller_scope: NodeId,
+    data: HashMap<Uuid, DataType>,
     // module included.
     modules: HashMap<String, module::ModuleItem>,
     // namespace using list
@@ -37,23 +33,9 @@ pub struct Runtime {
 
 impl Runtime {
     pub fn new() -> Self {
-        let mut scope = TreeBuilder::new().build();
-        let root = scope
-            .insert(Node::new(ScopeType::Block), id_tree::InsertBehavior::AsRoot)
-            .expect("Scope init failed.");
-
-        let func_scope = scope
-            .insert(
-                Node::new(ScopeType::Block),
-                id_tree::InsertBehavior::UnderNode(&root),
-            )
-            .expect("Scope init failed.");
-
         let mut this = Self {
-            vars: HashMap::new(),
-            scope,
-            root_scope: root,
-            function_caller_scope: func_scope,
+            scopes: vec![],
+            data: HashMap::new(),
             modules: Default::default(),
             namespace_use: Default::default(),
         };
@@ -71,33 +53,39 @@ impl Runtime {
         self.modules = module_exporter;
 
         for path in stdlib::auto_use() {
-            let temp: Vec<String> = path.split("::").into_iter().map(|v| v.to_string()).collect();
-            self.namespace_use.insert(temp.last().unwrap().to_string(), temp);
+            let temp: Vec<String> = path
+                .split("::")
+                .into_iter()
+                .map(|v| v.to_string())
+                .collect();
+            self.namespace_use
+                .insert(temp.last().unwrap().to_string(), temp);
         }
 
         Ok(())
     }
 
     pub fn trace(&self) {
-        println!("{:#?}", self.vars);
+        println!("{:#?}", self.scopes);
     }
 
     pub fn bind_module(&mut self, name: &str, module: ModuleGenerator) {
-        self.modules.insert(name.to_string(), module.to_module_item());
+        self.modules
+            .insert(name.to_string(), module.to_module_item());
     }
 
     pub fn add_script_function(
         &mut self,
         func: FunctionDefine,
-    ) -> Result<(Option<NodeId>, Value), RuntimeError> {
+    ) -> Result<(Option<Uuid>, Value), RuntimeError> {
         let full_name = func.name.clone();
         if let Some(name) = full_name {
-            let root_scope = self.root_scope.clone();
+            // let root_scope = self.root_scope.clone();
             let new_scope = self.set_var(
                 &name,
                 Value::Function(types::FunctionType::DScript(func.clone())),
-                &root_scope,
             )?;
+
             Ok((
                 Some(new_scope),
                 Value::Function(types::FunctionType::DScript(func)),
@@ -113,18 +101,27 @@ impl Runtime {
     }
 
     pub fn execute_ast(&mut self, ast: DioscriptAst) -> Result<Value, RuntimeError> {
-        let root_id = self.root_scope.clone();
-        let result = self.execute_scope(ast.stats, &root_id)?;
+        let result = self.execute_scope(ast.stats)?;
         Ok(result)
     }
 
-    fn execute_scope(
-        &mut self,
-        statements: Vec<DioAstStatement>,
-        current_scope: &NodeId,
-    ) -> Result<Value, RuntimeError> {
+    fn enter_scope(&mut self, i: bool) {
+        let scope = if i {
+            Scope::fun()
+        } else {
+            Scope::gen()    
+        };
+        self.scopes.push(scope);
+    }
+
+    fn leave_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn execute_scope(&mut self, statements: Vec<DioAstStatement>) -> Result<Value, RuntimeError> {
         let mut result: Value = Value::None;
         let mut finish = false;
+        self.enter_scope(false);
         for v in statements {
             if finish {
                 break;
@@ -136,35 +133,33 @@ impl Runtime {
                     self.namespace_use.insert(last.to_string(), u.clone());
                 }
                 DioAstStatement::VariableAss(var) => {
-                    let name = var.0.clone();
-                    let value = var.1.clone();
-                    let value = self.execute_calculate(value, current_scope)?;
-                    let _scope = self.set_var(&name, value, current_scope)?;
+                    // let name = var.0.clone();
+                    // let value = var.1.clone();
+                    let name = var.name.clone();
+                    let value = var.expr.clone();
+                    let value = self.execute_calculate(value)?;
+                    let _scope = self.set_var(&name, value)?;
                 }
                 DioAstStatement::ReturnValue(r) => {
-                    result = self.execute_calculate(r.clone(), current_scope)?;
-                    result = self.deref_value(result, current_scope)?;
+                    result = self.execute_calculate(r.clone())?;
+                    result = self.deref_value(result)?;
                     finish = true;
                 }
                 DioAstStatement::IfStatement(cond) => {
-                    let sub_scope = self.scope.insert(
-                        Node::new(ScopeType::Block),
-                        id_tree::InsertBehavior::UnderNode(current_scope),
-                    )?;
 
                     let condition_expr = cond.condition.clone();
                     let inner_ast = cond.inner.clone();
                     let otherwise = cond.otherwise.clone();
-                    let state = self.execute_calculate(condition_expr, current_scope)?;
+                    let state = self.execute_calculate(condition_expr)?;
                     if let Value::Boolean(state) = state {
                         if state {
-                            result = self.execute_scope(inner_ast, &sub_scope)?;
+                            result = self.execute_scope(inner_ast)?;
                             if !result.as_none() {
                                 finish = true;
                             }
                         } else {
                             if let Some(otherwise) = otherwise {
-                                result = self.execute_scope(otherwise, &sub_scope)?;
+                                result = self.execute_scope(otherwise)?;
                                 if !result.as_none() {
                                     finish = true;
                                 }
@@ -177,20 +172,16 @@ impl Runtime {
                     }
                 }
                 DioAstStatement::LoopStatement(data) => {
-                    let sub_scope = self.scope.insert(
-                        Node::new(ScopeType::Block),
-                        id_tree::InsertBehavior::UnderNode(current_scope),
-                    )?;
                     let execute_type = data.execute_type;
                     match execute_type {
                         LoopExecuteType::Conditional(cond) => loop {
                             let cond = cond.clone();
-                            let state = self.execute_calculate(cond, &current_scope)?;
+                            let state = self.execute_calculate(cond)?;
                             let state = state.to_boolean_data();
                             if !state {
                                 break;
                             } else {
-                                let res = self.execute_scope(data.inner.clone(), &sub_scope)?;
+                                let res = self.execute_scope(data.inner.clone())?;
                                 if !res.as_none() {
                                     result = res;
                                     finish = true;
@@ -199,11 +190,11 @@ impl Runtime {
                             }
                         },
                         LoopExecuteType::Iter { iter, var } => {
-                            let iter = self.to_value(iter, current_scope)?;
+                            let iter = self.to_value(iter)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
-                                    self.set_var(&var, i.clone(), &sub_scope)?;
-                                    let res = self.execute_scope(data.inner.clone(), &sub_scope)?;
+                                    self.set_var(&var, i.clone())?;
+                                    let res = self.execute_scope(data.inner.clone())?;
                                     if !res.as_none() {
                                         result = res;
                                         finish = true;
@@ -215,7 +206,7 @@ impl Runtime {
                     }
                 }
                 DioAstStatement::FunctionCall(func) => {
-                    let _result = self.execute_function(func, current_scope)?;
+                    let _result = self.execute_function(func)?;
                 }
                 DioAstStatement::FunctionDefine(define) => {
                     let f = self.add_script_function(define)?;
@@ -226,10 +217,11 @@ impl Runtime {
                 _ => {}
             }
         }
+        self.leave_scope();
         Ok(result)
     }
 
-    fn to_value(&mut self, value: AstValue, current_scope: &NodeId) -> Result<Value, RuntimeError> {
+    fn to_value(&mut self, value: AstValue) -> Result<Value, RuntimeError> {
         match value {
             AstValue::None => Ok(Value::None),
             AstValue::String(v) => Ok(Value::String(v)),
@@ -238,7 +230,7 @@ impl Runtime {
             AstValue::List(v) => {
                 let mut res = Vec::new();
                 for i in v {
-                    let value = self.to_value(i, current_scope)?;
+                    let value = self.to_value(i)?;
                     res.push(value);
                 }
                 Ok(Value::List(res))
@@ -246,31 +238,31 @@ impl Runtime {
             AstValue::Dict(v) => {
                 let mut res = HashMap::new();
                 for (k, v) in v {
-                    res.insert(k, self.to_value(v, current_scope)?);
+                    res.insert(k, self.to_value(v)?);
                 }
                 Ok(Value::Dict(res))
             }
             AstValue::Tuple((a, b)) => {
-                let a = self.to_value(*a, current_scope)?;
-                let b = self.to_value(*b, current_scope)?;
+                let a = self.to_value(*a)?;
+                let b = self.to_value(*b)?;
                 Ok(Value::Tuple((Box::new(a), Box::new(b))))
             }
             AstValue::Element(e) => {
-                let element = self.to_element(e, current_scope)?;
+                let element = self.to_element(e)?;
                 Ok(Value::Element(element))
             }
             AstValue::Variable(n) => {
-                let value = self.get_var(&n, current_scope)?.1;
+                let value = self.get_var(&n)?.1;
                 Ok(value)
             }
             AstValue::VariableIndex((n, i)) => {
-                let value = self.to_value(AstValue::Variable(n), current_scope)?;
-                let index = self.to_value(*i, current_scope)?;
+                let value = self.to_value(AstValue::Variable(n))?;
+                let index = self.to_value(*i)?;
                 let data = self.get_from_index(value, index)?;
                 Ok(data)
             }
             AstValue::FunctionCaller(caller) => {
-                let data = self.execute_function(caller, current_scope)?;
+                let data = self.execute_function(caller)?;
                 Ok(data)
             }
             AstValue::FunctionDefine(define) => {
@@ -279,12 +271,12 @@ impl Runtime {
         }
     }
 
-    fn deref_value(&self, value: Value, current_scope: &NodeId) -> Result<Value, RuntimeError> {
+    fn deref_value(&self, value: Value) -> Result<Value, RuntimeError> {
         match value {
             Value::List(list) => {
                 let mut new = vec![];
                 for i in list {
-                    let v = self.deref_value(i, current_scope)?;
+                    let v = self.deref_value(i)?;
                     new.push(v);
                 }
                 Ok(Value::List(new))
@@ -292,72 +284,45 @@ impl Runtime {
             Value::Dict(dict) => {
                 let mut new = HashMap::new();
                 for (k, v) in dict {
-                    let v = self.deref_value(v, current_scope)?;
+                    let v = self.deref_value(v)?;
                     new.insert(k, v);
                 }
                 Ok(Value::Dict(new))
             }
             Value::Tuple(tuple) => {
-                let first = self.deref_value(*tuple.0, current_scope)?;
-                let second = self.deref_value(*tuple.1, current_scope)?;
+                let first = self.deref_value(*tuple.0)?;
+                let second = self.deref_value(*tuple.1)?;
                 Ok(Value::Tuple((Box::new(first), Box::new(second))))
             }
             Value::Reference(id) => {
-                let ref_node = self.scope.get(&id)?;
-
-                let mut flag = false;
-                let ref_node_id = ref_node.parent().unwrap();
-                let mut curr_node_id = current_scope;
-
-                loop {
-                    if curr_node_id == ref_node_id {
-                        flag = true;
-                        break;
-                    }
-                    if let Some(v) = self.scope.get(curr_node_id)?.parent() {
-                        curr_node_id = v;
-                    } else {
-                        break;
-                    }
+                let data = self.data.get(&id).ok_or(RuntimeError::PoniterDataNotFound { name: id.to_string() })?;
+                #[allow(unreachable_patterns)]
+                match data {
+                    DataType::Variable(v) => Ok(v.clone().value),
+                    _ => Err(RuntimeError::PoniterDataNotFound { name: id.to_string() }),
                 }
-                if flag {
-                    let data = ref_node.data();
-                    if let ScopeType::Variable(v) = data {
-                        return Ok(v.value.clone());
-                    }
-                }
-                Err(RuntimeError::ReferenceNotFound { reference: id })
             }
             _ => Ok(value),
         }
     }
 
-    fn execute_function(
-        &mut self,
-        caller: FunctionCall,
-        current_scope: &NodeId,
-    ) -> Result<Value, RuntimeError> {
-        let runtime_scope = self.function_caller_scope.clone();
+    fn execute_function(&mut self, caller: FunctionCall) -> Result<Value, RuntimeError> {
         let name = caller.name;
         let params = caller.arguments;
         let mut par = vec![];
         for i in params {
-            let v = self.to_value(i, &current_scope)?;
+            let v = self.to_value(i)?;
             par.push(v);
         }
 
-        let func = self.get_function(name, current_scope)?;
+        let func = self.get_function(name)?;
 
         match func {
             types::FunctionType::DScript(f) => {
                 let f = f.clone();
-                let new_scope = self.scope.insert(
-                    Node::new(ScopeType::Block),
-                    id_tree::InsertBehavior::UnderNode(&runtime_scope),
-                )?;
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
-                        self.set_var(&v, Value::List(par), &new_scope)?;
+                        self.set_var(&v, Value::List(par))?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {
@@ -367,11 +332,11 @@ impl Runtime {
                             });
                         }
                         for (i, v) in v.iter().enumerate() {
-                            self.set_var(v, par.get(i).unwrap().clone(), &new_scope)?;
+                            self.set_var(v, par.get(i).unwrap().clone())?;
                         }
                     }
                 }
-                let result = self.execute_scope(f.inner, &new_scope)?;
+                let result = self.execute_scope(f.inner)?;
                 return Ok(result);
             }
             types::FunctionType::Rusty((f, need_param_num)) => {
@@ -390,19 +355,13 @@ impl Runtime {
         &mut self,
         func: FunctionType,
         par: Vec<Value>,
-        _current_scope: &NodeId,
     ) -> Result<Value, RuntimeError> {
-        let runtime_scope = self.function_caller_scope.clone();
         match func {
             types::FunctionType::DScript(f) => {
                 let f = f.clone();
-                let new_scope = self.scope.insert(
-                    Node::new(ScopeType::Block),
-                    id_tree::InsertBehavior::UnderNode(&runtime_scope),
-                )?;
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
-                        self.set_var(&v, Value::List(par), &new_scope)?;
+                        self.set_var(&v, Value::List(par))?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {
@@ -412,11 +371,11 @@ impl Runtime {
                             });
                         }
                         for (i, v) in v.iter().enumerate() {
-                            self.set_var(v, par.get(i).unwrap().clone(), &new_scope)?;
+                            self.set_var(v, par.get(i).unwrap().clone())?;
                         }
                     }
                 }
-                let result = self.execute_scope(f.inner, &new_scope)?;
+                let result = self.execute_scope(f.inner)?;
                 return Ok(result);
             }
             types::FunctionType::Rusty((f, need_param_num)) => {
@@ -434,11 +393,10 @@ impl Runtime {
     fn get_function(
         &self,
         name: FunctionName,
-        current_scope: &NodeId,
     ) -> Result<FunctionType, RuntimeError> {
         match name {
             FunctionName::Single(name) => {
-                let info = self.get_var(&name, current_scope);
+                let info = self.get_var(&name);
                 if let Ok((_, Value::Function(f))) = info {
                     Ok(f)
                 } else {
@@ -520,73 +478,69 @@ impl Runtime {
         Ok(r)
     }
 
-    fn execute_calculate(
-        &mut self,
-        expr: CalcExpr,
-        current_scope: &NodeId,
-    ) -> Result<Value, RuntimeError> {
+    fn execute_calculate(&mut self, expr: CalcExpr) -> Result<Value, RuntimeError> {
         match expr {
-            CalcExpr::Value(v) => Ok(self.to_value(v, current_scope)?),
-            CalcExpr::LinkExpr(v) => Ok(self.execute_link_expr(v, current_scope)?),
+            CalcExpr::Value(v) => Ok(self.to_value(v)?),
+            CalcExpr::LinkExpr(v) => Ok(self.execute_link_expr(v)?),
             CalcExpr::Add(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Plus)
             }
             CalcExpr::Sub(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Minus)
             }
             CalcExpr::Mul(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Multiply)
             }
             CalcExpr::Div(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Divide)
             }
             CalcExpr::Mod(_, _) => Ok(Value::Boolean(false)),
             CalcExpr::Eq(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Equal)
             }
             CalcExpr::Ne(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::NotEqual)
             }
             CalcExpr::Gt(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Large)
             }
             CalcExpr::Lt(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Small)
             }
             CalcExpr::Ge(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::LargeOrEqual)
             }
             CalcExpr::Le(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::SmallOrEqual)
             }
             CalcExpr::And(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::And)
             }
             CalcExpr::Or(l, r) => {
-                let l = self.execute_calculate(*l, current_scope)?;
-                let r = self.execute_calculate(*r, current_scope)?;
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Or)
             }
         }
@@ -595,14 +549,13 @@ impl Runtime {
     fn execute_link_expr(
         &mut self,
         v: LinkExpr,
-        current_scope: &NodeId,
     ) -> Result<Value, RuntimeError> {
-        let mut this = self.to_value(v.this, current_scope)?;
+        let mut this = self.to_value(v.this)?;
         let list = v.list;
         for op in list {
             match op {
                 dioscript_parser::parser::LinkExprPart::Field(field) => {
-                    this = self.deref_value(this.clone(), current_scope)?;
+                    this = self.deref_value(this.clone())?;
                     match &this {
                         Value::List(list) => {
                             let index = field.parse::<usize>();
@@ -683,22 +636,20 @@ impl Runtime {
                     }
                 }
                 dioscript_parser::parser::LinkExprPart::FunctionCall(call) => {
-                    let root_scope = self.root_scope.clone();
                     match &this {
                         Value::String(content) => {
                             let mut pararms = vec![Value::String(content.to_string())];
                             for i in call.arguments {
-                                let v = self.to_value(i, &current_scope)?;
+                                let v = self.to_value(i)?;
                                 pararms.push(v);
                             }
-                            let v = self.get_var("string", &root_scope)?.1;
-                            let v = self.deref_value(v, current_scope)?;
+                            let v = self.get_var("string")?.1;
+                            let v = self.deref_value(v)?;
                             if let Value::Dict(v) = v {
                                 if let Some(Value::Function(f)) = v.get(&call.name.as_single()) {
                                     this = self.execute_function_by_ft(
                                         f.clone(),
                                         pararms,
-                                        current_scope,
                                     )?;
                                 }
                             }
@@ -717,33 +668,20 @@ impl Runtime {
                 }
             }
         }
-        Ok(self.deref_value(this, current_scope)?)
+        Ok(self.deref_value(this)?)
     }
 
-    fn get_var(&self, name: &str, current_scope: &NodeId) -> Result<(NodeId, Value), RuntimeError> {
-        if let Some(ref_scope) = self.vars.get(name) {
-            if let Ok(ref_node) = self.scope.get(ref_scope) {
-                let mut flag = false;
-                let ref_node_id = ref_node.parent().unwrap();
-                let mut curr_node_id = current_scope;
-
-                loop {
-                    if curr_node_id == ref_node_id {
-                        flag = true;
-                        break;
-                    }
-                    if let Some(v) = self.scope.get(curr_node_id)?.parent() {
-                        curr_node_id = v;
-                    } else {
-                        break;
-                    }
+    fn get_var(&self, name: &str) -> Result<(Uuid, Value), RuntimeError> {
+        for scope in self.scopes.iter().rev() {
+            if scope.isolate {
+                break;
+            }
+            if let Some(uuid) = scope.data.get(name) {
+                if let Some(data_type) = self.data.get(uuid) {
+                    let value = data_type.as_variable().unwrap().value;
+                    return Ok((uuid.clone(), value));
                 }
-                if flag {
-                    let data = ref_node.data();
-                    if let ScopeType::Variable(v) = data {
-                        return Ok((ref_node_id.clone(), v.value.clone()));
-                    }
-                }
+                break;
             }
         }
         Err(RuntimeError::VariableNotFound {
@@ -751,88 +689,7 @@ impl Runtime {
         })
     }
 
-    #[allow(dead_code)]
-    fn get_mut_var(
-        &mut self,
-        name: &str,
-        current_scope: &NodeId,
-    ) -> Result<&mut Value, RuntimeError> {
-        if let Some(ref_scope) = self.vars.get(name) {
-            if let Ok(ref_node) = self.scope.get(ref_scope) {
-                let mut flag = false;
-                let ref_node_id = ref_node.parent().unwrap();
-                let mut curr_node_id = current_scope;
-
-                loop {
-                    if curr_node_id == ref_node_id {
-                        flag = true;
-                        break;
-                    }
-                    if let Some(v) = self.scope.get(curr_node_id)?.parent() {
-                        curr_node_id = v;
-                    } else {
-                        break;
-                    }
-                }
-                if flag {
-                    let ref_node = self.scope.get_mut(ref_scope)?;
-                    if let ScopeType::Variable(v) = ref_node.data_mut() {
-                        return Ok(&mut v.value);
-                    }
-                }
-            }
-        }
-        Err(RuntimeError::VariableNotFound {
-            name: name.to_string(),
-        })
-    }
-
-    fn get_mut_var_by_id(
-        &mut self,
-        id: &NodeId,
-        current_scope: &NodeId,
-    ) -> Result<&mut Value, RuntimeError> {
-        let ref_node = self.scope.get(&id)?;
-
-        let mut flag = false;
-        let ref_node_id = ref_node.parent().unwrap();
-        let mut curr_node_id = current_scope;
-
-        loop {
-            if curr_node_id == ref_node_id {
-                flag = true;
-                break;
-            }
-            if let Some(v) = self.scope.get(curr_node_id)?.parent() {
-                curr_node_id = v;
-            } else {
-                break;
-            }
-        }
-        if flag {
-            let ref_node = self.scope.get_mut(&id)?;
-            if let ScopeType::Variable(v) = ref_node.data_mut() {
-                return Ok(&mut v.value);
-            }
-        }
-        Err(RuntimeError::ReferenceNotFound {
-            reference: id.clone(),
-        })
-    }
-
-    fn set_var(
-        &mut self,
-        name: &str,
-        value: Value,
-        current_scope: &NodeId,
-    ) -> Result<NodeId, RuntimeError> {
-        let new_node_scope = if let Some(scope) = self.vars.get(name) {
-            let scope = self.scope.get(scope)?.parent().unwrap().clone();
-            scope
-        } else {
-            current_scope.clone()
-        };
-
+    fn set_var(&mut self, name: &str, value: Value) -> Result<Uuid, RuntimeError> {
         let value = match value {
             Value::List(list) => {
                 let mut result = vec![];
@@ -842,7 +699,7 @@ impl Runtime {
                         result.push(v.clone());
                     } else {
                         let name = format!("{name}[{i}]");
-                        let id = self.set_var(&name, v.clone(), &new_node_scope)?;
+                        let id = self.set_var(&name, v.clone())?;
                         result.push(Value::Reference(id));
                     }
                 }
@@ -856,7 +713,7 @@ impl Runtime {
                         result.insert(k, v);
                     } else {
                         let name = format!("{name}[{k}]");
-                        let id = self.set_var(&name, v.clone(), &new_node_scope)?;
+                        let id = self.set_var(&name, v.clone())?;
                         result.insert(k, Value::Reference(id));
                     }
                 }
@@ -868,8 +725,8 @@ impl Runtime {
                         // ignore
                         Box::new(*tuple.0)
                     } else {
-                        let name = format!("{name}[0]");
-                        let id = self.set_var(&name, *tuple.0, &new_node_scope)?;
+                        let name = format!(".{name}.0");
+                        let id = self.set_var(&name, *tuple.0)?;
                         Box::new(Value::Reference(id))
                     }
                 };
@@ -879,7 +736,7 @@ impl Runtime {
                         Box::new(*tuple.1)
                     } else {
                         let name = format!(".{name}.1");
-                        let id = self.set_var(&name, *tuple.1, current_scope)?;
+                        let id = self.set_var(&name, *tuple.1)?;
                         Box::new(Value::Reference(id))
                     }
                 };
@@ -887,22 +744,29 @@ impl Runtime {
             }
             _ => value,
         };
-        let scope = if let Some(scope) = self.vars.get(name) {
-            let vars = self.scope.get_mut(scope)?.data_mut();
-            if let ScopeType::Variable(v) = vars {
-                v.value = value;
-                v.counter += 1;
+
+        let id = if let Ok((id, _)) = self.get_var(name) {
+            let data = self.data.get_mut(&id).unwrap();
+            #[allow(unreachable_patterns)]
+            match data {
+                DataType::Variable(v) => {
+                    v.value = value;
+                    v.counter += 1;
+                }
+                _ => (),
             }
-            scope.clone()
+            id
         } else {
-            let new_scope = self.scope.insert(
-                Node::new(ScopeType::Variable(Variable { value, counter: 0 })),
-                id_tree::InsertBehavior::UnderNode(current_scope),
-            )?;
-            self.vars.insert(name.to_string(), new_scope.clone());
-            new_scope
+            let id = Uuid::new_v4();
+            let _ = self
+                .data
+                .insert(id, DataType::Variable(Variable { value, counter: 0 }));
+            if let Some(current_scope) = self.scopes.last_mut() {
+                current_scope.data.insert(name.to_string(), id);
+            }
+            id
         };
-        return Ok(scope);
+        return Ok(id);
     }
 
     fn get_from_index(&self, value: Value, index: Value) -> Result<Value, RuntimeError> {
@@ -990,40 +854,32 @@ impl Runtime {
         }
     }
 
-    fn to_element(
-        &mut self,
-        element: AstElement,
-        current_scope: &NodeId,
-    ) -> Result<Element, RuntimeError> {
+    fn to_element(&mut self, element: AstElement) -> Result<Element, RuntimeError> {
         let mut attrs = HashMap::new();
         for i in element.attributes {
             let name = i.0;
             let data = i.1;
-            attrs.insert(name, self.to_value(data, current_scope)?);
+            attrs.insert(name, self.to_value(data)?);
         }
         let mut content = vec![];
         for i in element.content {
             match i {
                 AstElementContentType::Children(v) => {
-                    let executed_element = self.to_element(v, current_scope)?;
+                    let executed_element = self.to_element(v)?;
                     content.push(ElementContentType::Children(executed_element));
                 }
                 AstElementContentType::Content(v) => {
                     content.push(ElementContentType::Content(v));
                 }
                 AstElementContentType::Condition(v) => {
-                    let value = self.execute_calculate(v.condition, current_scope)?;
-                    let sub_scope = self.scope.insert(
-                        Node::new(ScopeType::Block),
-                        id_tree::InsertBehavior::UnderNode(current_scope),
-                    )?;
+                    let value = self.execute_calculate(v.condition)?;
                     if let Value::Boolean(b) = value {
                         let mut temp = Value::None;
                         if b {
-                            temp = self.execute_scope(v.inner, &sub_scope)?;
+                            temp = self.execute_scope(v.inner)?;
                         } else {
                             if let Some(otherwise) = v.otherwise {
-                                temp = self.execute_scope(otherwise, &sub_scope)?;
+                                temp = self.execute_scope(otherwise)?;
                             }
                         }
                         if let Value::Tuple((k, v)) = &temp {
@@ -1043,20 +899,16 @@ impl Runtime {
                     }
                 }
                 AstElementContentType::Loop(v) => {
-                    let sub_scope = self.scope.insert(
-                        Node::new(ScopeType::Block),
-                        id_tree::InsertBehavior::UnderNode(current_scope),
-                    )?;
                     let execute_type = v.execute_type;
                     match execute_type {
                         LoopExecuteType::Conditional(cond) => loop {
                             let cond = cond.clone();
-                            let state = self.execute_calculate(cond, &current_scope)?;
+                            let state = self.execute_calculate(cond)?;
                             let state = state.to_boolean_data();
                             if !state {
                                 break;
                             } else {
-                                let temp = self.execute_scope(v.inner.clone(), &sub_scope)?;
+                                let temp = self.execute_scope(v.inner.clone())?;
                                 if let Value::Tuple((k, v)) = &temp {
                                     if let Value::String(k) = *k.clone() {
                                         attrs.insert(k.to_string(), *v.clone());
@@ -1074,11 +926,11 @@ impl Runtime {
                             }
                         },
                         LoopExecuteType::Iter { iter, var } => {
-                            let iter = self.to_value(iter, current_scope)?;
+                            let iter = self.to_value(iter)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
-                                    self.set_var(&var, i.clone(), &sub_scope)?;
-                                    let temp = self.execute_scope(v.inner.clone(), &sub_scope)?;
+                                    self.set_var(&var, i.clone())?;
+                                    let temp = self.execute_scope(v.inner.clone())?;
                                     if let Value::Tuple((k, v)) = &temp {
                                         if let Value::String(k) = *k.clone() {
                                             attrs.insert(k.to_string(), *v.clone());
@@ -1099,7 +951,7 @@ impl Runtime {
                     }
                 }
                 AstElementContentType::InlineExpr(v) => {
-                    let result = self.execute_calculate(v, current_scope)?;
+                    let result = self.execute_calculate(v)?;
                     if let Value::String(s) = &result {
                         content.push(ElementContentType::Content(s.clone()));
                     }
@@ -1117,15 +969,38 @@ impl Runtime {
     }
 }
 
-pub enum ScopeType {
-    Block,
+#[derive(Debug)]
+pub struct Scope {
+    isolate: bool,
+    data: HashMap<String, Uuid>
+}
+
+impl Scope {
+    pub fn gen() -> Self {
+        Self {
+            isolate: false,
+            data: HashMap::new(),
+        }
+    }
+
+    pub fn fun() -> Self {
+        Self {
+            isolate: true,
+            data: HashMap::new(),
+        }
+    }
+}
+
+pub enum DataType {
     Variable(Variable),
 }
 
-impl ScopeType {
+impl DataType {
     pub fn as_variable(&self) -> Option<Variable> {
-        if let Self::Variable(r) = self {
-            return Some(r.clone());
+        #[allow(unreachable_patterns)]
+        match self {
+            Self::Variable(r) => return Some(r.clone()),
+            _ => (),
         }
         None
     }

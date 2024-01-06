@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use dioscript_parser::ast::{CalculateMark, FunctionDefine};
+use uuid::Uuid;
 
 use crate::error::RuntimeError;
 
@@ -15,7 +16,7 @@ pub enum Value {
     Tuple((Box<Value>, Box<Value>)),
     Element(Element),
     Function(FunctionType),
-    Reference(id_tree::NodeId),
+    Reference(Uuid),
 }
 
 #[derive(Debug, Clone, PartialEq)]

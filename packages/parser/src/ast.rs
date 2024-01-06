@@ -35,15 +35,22 @@ impl DioscriptAst {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DioAstStatement {
-    VariableAss((String, CalcExpr)),
+    VariableAss(VariableDefine),
     ReturnValue(CalcExpr),
     IfStatement(ConditionalStatement),
     LoopStatement(LoopStatement),
     LineComment(String),
     FunctionCall(FunctionCall),
     FunctionDefine(FunctionDefine),
-    
+
     ModuleUse(UseStatement),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VariableDefine {
+    pub new: bool,
+    pub name: String,
+    pub expr: CalcExpr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,7 +69,7 @@ impl ToString for FunctionName {
     fn to_string(&self) -> String {
         match self {
             FunctionName::Single(s) => s.to_string(),
-            FunctionName::Namespace(n) => { n.join("::") },
+            FunctionName::Namespace(n) => n.join("::"),
         }
     }
 }
@@ -72,7 +79,6 @@ impl FunctionName {
         self.to_string()
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDefine {

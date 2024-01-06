@@ -17,7 +17,7 @@ use nom::{
 use crate::{
     ast::{
         ConditionalStatement, DioAstStatement, FunctionCall, FunctionDefine, LoopStatement,
-        ParamsType, UseStatement, FunctionName,
+        ParamsType, UseStatement, FunctionName, VariableDefine,
     },
     element::{AstElement, AstElementContentType},
     types::AstValue,
@@ -244,16 +244,21 @@ impl VariableParser {
         )(message)
     }
 
-    fn parse(message: &str) -> IResult<&str, (String, CalcExpr)> {
+    fn parse(message: &str) -> IResult<&str, VariableDefine> {
         context(
             "variable",
             map(
                 tuple((
+                    opt(terminated(tag("let"), space1)),
                     terminated(Self::parse_var_name, delimited(space0, tag("="), space0)),
                     CalculateParser::expr,
                     tag(";"),
                 )),
-                |v| (v.0.to_string(), v.1),
+                |v| VariableDefine {
+                    new: v.0.is_some(),
+                    name: v.1.to_string(),
+                    expr: v.2,
+                },
             ),
         )(message)
     }
@@ -682,7 +687,7 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
             alt((
                 map(comment, |v| DioAstStatement::LineComment(v)),
                 map(VariableParser::parse, |v| {
-                    DioAstStatement::VariableAss((v.0.to_string(), v.1.clone()))
+                    DioAstStatement::VariableAss(v)
                 }),
                 map(
                     delimited(tag("return "), CalculateParser::expr, tag(";")),

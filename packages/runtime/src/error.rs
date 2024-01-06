@@ -25,8 +25,8 @@ pub enum RuntimeError {
     #[error("function `{name}` not found.")]
     FunctionNotFound { name: String },
 
-    #[error("scope node id have some problem.")]
-    ScopeNodeIdProblem(#[from] id_tree::NodeIdError),
+    #[error("`{name}` pointer data not found")]
+    PoniterDataNotFound { name: String },
 
     #[error("cannot use `{value_type}` in conditional statement.")]
     IllegalTypeInConditional { value_type: String },
@@ -48,9 +48,6 @@ pub enum RuntimeError {
 
     #[error("cannot find bind function location: `{func}`.")]
     BindFunctionNotFound { func: String },
-
-    #[error("cannot find reference: {reference:?}.")]
-    ReferenceNotFound { reference: id_tree::NodeId },
 
     #[error("unknown attribute `{attr}` for `{value}` data.")]
     UnknownAttribute { attr: String, value: String },
