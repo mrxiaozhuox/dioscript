@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 
 #[allow(non_snake_case)]
 #[component]
-pub fn View(cx: Scope, code: String) -> Element {
+pub fn View(code: String) -> Element {
     let mut rt = dioscript_runtime::Runtime::new();
     let result = rt.execute(&code);
     match result {
@@ -13,18 +13,42 @@ pub fn View(cx: Scope, code: String) -> Element {
                 Value::Element(e) => e.to_html(),
                 _ => String::new(),
             };
-            cx.render(rsx! {
+            rsx! {
                 div {
                     id: "dioscript",
                     dangerous_inner_html: "{html}"
                 }
-            })
+            }
         }
         Err(e) => {
             let message = e.to_string();
-            cx.render(rsx! {
+            rsx! {
                 div { class: "font-semibold", "Error: {message}" }
-            })
+            }
         },
     }
+}
+
+#[allow(non_snake_case)]
+#[component]
+pub fn AstView(code: String) -> Element {
+    let ast = dioscript_parser::ast::DioscriptAst::from_string(&code);
+    match ast {
+        Ok(result) => {
+            rsx! {
+                div {
+                    class: "text-xs font-semibold w-[550px] h-[670px] overflow-scroll",
+                    id: "dioscript",
+                    dangerous_inner_html: "<pre>{result:#?}</pre>"
+                }
+            }
+        }
+        Err(e) => {
+            let message = e.to_string();
+            rsx! {
+                div { class: "font-semibold", "Error: {message}" }
+            }
+        },
+    }
+
 }

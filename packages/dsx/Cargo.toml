@@ -8,5 +8,4 @@ edition = "2021"
 [dependencies]
 dioscript-parser = { path = "../parser" }
 dioscript-runtime = { path = "../runtime" }
-dioxus = "0.4.3"
-# dioxus-desktop = "0.4.3"
+dioxus = "0.5.6"

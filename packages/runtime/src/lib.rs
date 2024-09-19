@@ -106,11 +106,7 @@ impl Runtime {
     }
 
     fn enter_scope(&mut self, i: bool) {
-        let scope = if i {
-            Scope::fun()
-        } else {
-            Scope::gen()    
-        };
+        let scope = if i { Scope::fun() } else { Scope::gen() };
         self.scopes.push(scope);
     }
 
@@ -146,7 +142,6 @@ impl Runtime {
                     finish = true;
                 }
                 DioAstStatement::IfStatement(cond) => {
-
                     let condition_expr = cond.condition.clone();
                     let inner_ast = cond.inner.clone();
                     let otherwise = cond.otherwise.clone();
@@ -295,11 +290,18 @@ impl Runtime {
                 Ok(Value::Tuple((Box::new(first), Box::new(second))))
             }
             Value::Reference(id) => {
-                let data = self.data.get(&id).ok_or(RuntimeError::PoniterDataNotFound { name: id.to_string() })?;
+                let data = self
+                    .data
+                    .get(&id)
+                    .ok_or(RuntimeError::PoniterDataNotFound {
+                        name: id.to_string(),
+                    })?;
                 #[allow(unreachable_patterns)]
                 match data {
-                    DataType::Variable(v) => Ok(v.clone().value),
-                    _ => Err(RuntimeError::PoniterDataNotFound { name: id.to_string() }),
+                    DataType::Variable(v) => Ok(v.clone()),
+                    _ => Err(RuntimeError::PoniterDataNotFound {
+                        name: id.to_string(),
+                    }),
                 }
             }
             _ => Ok(value),
@@ -390,10 +392,7 @@ impl Runtime {
         }
     }
 
-    fn get_function(
-        &self,
-        name: FunctionName,
-    ) -> Result<FunctionType, RuntimeError> {
+    fn get_function(&self, name: FunctionName) -> Result<FunctionType, RuntimeError> {
         match name {
             FunctionName::Single(name) => {
                 let info = self.get_var(&name);
@@ -542,14 +541,11 @@ impl Runtime {
                 let l = self.execute_calculate(*l)?;
                 let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Or)
-            }
+            },
         }
     }
 
-    fn execute_link_expr(
-        &mut self,
-        v: LinkExpr,
-    ) -> Result<Value, RuntimeError> {
+    fn execute_link_expr(&mut self, v: LinkExpr) -> Result<Value, RuntimeError> {
         let mut this = self.to_value(v.this)?;
         let list = v.list;
         for op in list {
@@ -635,37 +631,32 @@ impl Runtime {
                         }
                     }
                 }
-                dioscript_parser::parser::LinkExprPart::FunctionCall(call) => {
-                    match &this {
-                        Value::String(content) => {
-                            let mut pararms = vec![Value::String(content.to_string())];
-                            for i in call.arguments {
-                                let v = self.to_value(i)?;
-                                pararms.push(v);
-                            }
-                            let v = self.get_var("string")?.1;
-                            let v = self.deref_value(v)?;
-                            if let Value::Dict(v) = v {
-                                if let Some(Value::Function(f)) = v.get(&call.name.as_single()) {
-                                    this = self.execute_function_by_ft(
-                                        f.clone(),
-                                        pararms,
-                                    )?;
-                                }
-                            }
+                dioscript_parser::parser::LinkExprPart::FunctionCall(call) => match &this {
+                    Value::String(content) => {
+                        let mut pararms = vec![Value::String(content.to_string())];
+                        for i in call.arguments {
+                            let v = self.to_value(i)?;
+                            pararms.push(v);
                         }
-                        Value::Number(_) => todo!(),
-                        Value::Boolean(_) => todo!(),
-                        Value::List(_) => todo!(),
-                        Value::Dict(_) => todo!(),
-                        Value::Tuple(_) => todo!(),
-                        Value::Element(_) => todo!(),
-                        Value::Function(_) => todo!(),
-                        _ => {
-                            unimplemented!()
+                        let v = self.get_var("string")?.1;
+                        let v = self.deref_value(v)?;
+                        if let Value::Dict(v) = v {
+                            if let Some(Value::Function(f)) = v.get(&call.name.as_single()) {
+                                this = self.execute_function_by_ft(f.clone(), pararms)?;
+                            }
                         }
                     }
-                }
+                    Value::Number(_) => todo!(),
+                    Value::Boolean(_) => todo!(),
+                    Value::List(_) => todo!(),
+                    Value::Dict(_) => todo!(),
+                    Value::Tuple(_) => todo!(),
+                    Value::Element(_) => todo!(),
+                    Value::Function(_) => todo!(),
+                    _ => {
+                        unimplemented!()
+                    }
+                },
             }
         }
         Ok(self.deref_value(this)?)
@@ -678,7 +669,7 @@ impl Runtime {
             }
             if let Some(uuid) = scope.data.get(name) {
                 if let Some(data_type) = self.data.get(uuid) {
-                    let value = data_type.as_variable().unwrap().value;
+                    let value = data_type.as_variable().unwrap();
                     return Ok((uuid.clone(), value));
                 }
                 break;
@@ -690,68 +681,67 @@ impl Runtime {
     }
 
     fn set_var(&mut self, name: &str, value: Value) -> Result<Uuid, RuntimeError> {
-        let value = match value {
-            Value::List(list) => {
-                let mut result = vec![];
-                for (i, v) in list.iter().enumerate() {
-                    if let Value::Reference(_) = v {
-                        // ignore
-                        result.push(v.clone());
-                    } else {
-                        let name = format!("{name}[{i}]");
-                        let id = self.set_var(&name, v.clone())?;
-                        result.push(Value::Reference(id));
-                    }
-                }
-                Value::List(result)
-            }
-            Value::Dict(dict) => {
-                let mut result = HashMap::new();
-                for (k, v) in dict {
-                    if let Value::Reference(_) = v {
-                        // ignore
-                        result.insert(k, v);
-                    } else {
-                        let name = format!("{name}[{k}]");
-                        let id = self.set_var(&name, v.clone())?;
-                        result.insert(k, Value::Reference(id));
-                    }
-                }
-                Value::Dict(result)
-            }
-            Value::Tuple(tuple) => {
-                let first = {
-                    if let Value::Reference(_) = *tuple.0.clone() {
-                        // ignore
-                        Box::new(*tuple.0)
-                    } else {
-                        let name = format!(".{name}.0");
-                        let id = self.set_var(&name, *tuple.0)?;
-                        Box::new(Value::Reference(id))
-                    }
-                };
-                let second = {
-                    if let Value::Reference(_) = *tuple.1.clone() {
-                        // ignore
-                        Box::new(*tuple.1)
-                    } else {
-                        let name = format!(".{name}.1");
-                        let id = self.set_var(&name, *tuple.1)?;
-                        Box::new(Value::Reference(id))
-                    }
-                };
-                Value::Tuple((first, second))
-            }
-            _ => value,
-        };
+        // let value = match value {
+        //     Value::List(list) => {
+        //         let mut result = vec![];
+        //         for (i, v) in list.iter().enumerate() {
+        //             if let Value::Reference(_) = v {
+        //                 // ignore
+        //                 result.push(v.clone());
+        //             } else {
+        //                 let name = format!("{name}[{i}]");
+        //                 let id = self.set_var(&name, v.clone())?;
+        //                 result.push(Value::Reference(id));
+        //             }
+        //         }
+        //         Value::List(result)
+        //     }
+        //     Value::Dict(dict) => {
+        //         let mut result = HashMap::new();
+        //         for (k, v) in dict {
+        //             if let Value::Reference(_) = v {
+        //                 // ignore
+        //                 result.insert(k, v);
+        //             } else {
+        //                 let name = format!("{name}[{k}]");
+        //                 let id = self.set_var(&name, v.clone())?;
+        //                 result.insert(k, Value::Reference(id));
+        //             }
+        //         }
+        //         Value::Dict(result)
+        //     }
+        //     Value::Tuple(tuple) => {
+        //         let first = {
+        //             if let Value::Reference(_) = *tuple.0.clone() {
+        //                 // ignore
+        //                 Box::new(*tuple.0)
+        //             } else {
+        //                 let name = format!(".{name}.0");
+        //                 let id = self.set_var(&name, *tuple.0)?;
+        //                 Box::new(Value::Reference(id))
+        //             }
+        //         };
+        //         let second = {
+        //             if let Value::Reference(_) = *tuple.1.clone() {
+        //                 // ignore
+        //                 Box::new(*tuple.1)
+        //             } else {
+        //                 let name = format!(".{name}.1");
+        //                 let id = self.set_var(&name, *tuple.1)?;
+        //                 Box::new(Value::Reference(id))
+        //             }
+        //         };
+        //         Value::Tuple((first, second))
+        //     }
+        //     _ => value,
+        // };
 
         let id = if let Ok((id, _)) = self.get_var(name) {
             let data = self.data.get_mut(&id).unwrap();
             #[allow(unreachable_patterns)]
             match data {
                 DataType::Variable(v) => {
-                    v.value = value;
-                    v.counter += 1;
+                    *v = value;
                 }
                 _ => (),
             }
@@ -760,13 +750,22 @@ impl Runtime {
             let id = Uuid::new_v4();
             let _ = self
                 .data
-                .insert(id, DataType::Variable(Variable { value, counter: 0 }));
+                .insert(id, DataType::Variable(value));
             if let Some(current_scope) = self.scopes.last_mut() {
                 current_scope.data.insert(name.to_string(), id);
             }
             id
         };
         return Ok(id);
+    }
+
+    #[allow(dead_code)]
+    fn create_data(&mut self, data: Value) -> Result<Uuid, RuntimeError> {
+        let id = Uuid::new_v4();
+        self.data.insert(id, DataType::Variable(
+            data
+        ));
+        Ok(id)
     }
 
     fn get_from_index(&self, value: Value, index: Value) -> Result<Value, RuntimeError> {
@@ -972,7 +971,7 @@ impl Runtime {
 #[derive(Debug)]
 pub struct Scope {
     isolate: bool,
-    data: HashMap<String, Uuid>
+    data: HashMap<String, Uuid>,
 }
 
 impl Scope {
@@ -992,11 +991,11 @@ impl Scope {
 }
 
 pub enum DataType {
-    Variable(Variable),
+    Variable(Value),
 }
 
 impl DataType {
-    pub fn as_variable(&self) -> Option<Variable> {
+    pub fn as_variable(&self) -> Option<Value> {
         #[allow(unreachable_patterns)]
         match self {
             Self::Variable(r) => return Some(r.clone()),
@@ -1006,8 +1005,3 @@ impl DataType {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Variable {
-    pub value: Value,
-    pub counter: u32,
-}

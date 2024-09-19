@@ -1,9 +1,7 @@
 use nom::Finish;
 
 use crate::{
-    error::ParseError,
-    parser::{parse_rsx, CalcExpr},
-    types::AstValue,
+    error::ParseError, parser::{parse_rsx, CalcExpr}, types::AstValue
 };
 
 #[derive(Debug, Clone, PartialEq)]

@@ -103,6 +103,7 @@ pub fn main() {
                 if input == ".execute" || input == "." {
                     let code = code_buffer.join("\n");
                     let ast = dioscript_parser::ast::DioscriptAst::from_string(&code);
+                    println!("{:#?}", ast);
                     match ast {
                         Ok(ast) => {
                             let result = runtime.execute_ast(ast);
