@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use dsx::{AstView, View};
+use dsx::{AstView, NamespaceView, View};
 use indoc::indoc;
 
 fn main() {
@@ -37,7 +37,7 @@ pub fn App() -> Element {
         }
     });
    
-    let mut display_result = use_signal(|| true);
+    let mut display_result = use_signal(|| 0);
 
     rsx! {
         script {
@@ -55,13 +55,18 @@ pub fn App() -> Element {
                     class: "basis-1/2",
                     button { 
                         class: "bg-cyan-500 hover:bg-cyan-700 text-white font-semibold text-sm py-2 px-3 rounded",
-                        onclick: move |_| { display_result.set(true); },
+                        onclick: move |_| { display_result.set(0); },
                         "Result"
                     }
                     button {
                         class: "bg-emerald-500 hover:bg-emerald-700 text-white font-semibold text-sm ml-2 py-2 px-3 rounded",
-                        onclick: move |_| { display_result.set(false); },
+                        onclick: move |_| { display_result.set(1); },
                         "AST Tree"   
+                    }
+                    button {
+                        class: "bg-emerald-500 hover:bg-emerald-700 text-white font-semibold text-sm ml-2 py-2 px-3 rounded",
+                        onclick: move |_| { display_result.set(2); },
+                        "Using Namespace"   
                     }
                 }
             }
@@ -80,12 +85,14 @@ pub fn App() -> Element {
                         class: "w-full h-[700px] border border-gray-400",
                         div {
                             class: "mt-1 px-4 py-4",    
-                            if *display_result.read() {
+                            if *display_result.read() == 0 {
                                 View {
                                   code: editor_content.to_string(),  
                                 }
-                            } else {
+                            } else if *display_result.read() == 1 {
                                 AstView { code: editor_content.to_string() }
+                            } else if *display_result.read() == 2 {
+                                NamespaceView { code: editor_content.to_string() }
                             }
                         }
                     }

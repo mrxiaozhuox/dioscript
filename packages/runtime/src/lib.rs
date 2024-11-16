@@ -69,6 +69,10 @@ impl Runtime {
         println!("{:#?}", self.scopes);
     }
 
+    pub fn using_namespace(&self) -> HashMap<String, Vec<String>> {
+        self.namespace_use.clone()
+    }
+
     pub fn bind_module(&mut self, name: &str, module: ModuleGenerator) {
         self.modules
             .insert(name.to_string(), module.to_module_item());
@@ -322,12 +326,18 @@ impl Runtime {
         match func {
             types::FunctionType::DScript(f) => {
                 let f = f.clone();
+
+                // Enter a new function scope (isolated)
+                self.enter_scope(true);
+
+                // Set the function parameters in the new scope
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
                         self.set_var(&v, Value::List(par))?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {
+                            self.leave_scope(); // Ensure we leave the scope on error
                             return Err(RuntimeError::IllegalArgumentsNumber {
                                 need: v.len() as i16,
                                 provided: par.len() as i16,
@@ -338,7 +348,13 @@ impl Runtime {
                         }
                     }
                 }
+
+                // Execute the function body
                 let result = self.execute_scope(f.inner)?;
+
+                // Leave the function scope
+                self.leave_scope();
+
                 return Ok(result);
             }
             types::FunctionType::Rusty((f, need_param_num)) => {
@@ -361,12 +377,18 @@ impl Runtime {
         match func {
             types::FunctionType::DScript(f) => {
                 let f = f.clone();
+
+                // Enter a new function scope (isolated)
+                self.enter_scope(true);
+
+                // Set the function parameters in the new scope
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
                         self.set_var(&v, Value::List(par))?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {
+                            self.leave_scope(); // Ensure we leave the scope on error
                             return Err(RuntimeError::IllegalArgumentsNumber {
                                 need: v.len() as i16,
                                 provided: par.len() as i16,
@@ -377,7 +399,13 @@ impl Runtime {
                         }
                     }
                 }
+
+                // Execute the function body
                 let result = self.execute_scope(f.inner)?;
+
+                // Leave the function scope
+                self.leave_scope();
+
                 return Ok(result);
             }
             types::FunctionType::Rusty((f, need_param_num)) => {
@@ -501,7 +529,12 @@ impl Runtime {
                 let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Divide)
             }
-            CalcExpr::Mod(_, _) => Ok(Value::Boolean(false)),
+            CalcExpr::Mod(_l, _r) => {
+                // let l = self.execute_calculate(*l)?;
+                // let r = self.execute_calculate(*r)?;
+                // l.calc(&r, CalculateMark::Mod)
+                Ok(Value::Boolean(false))
+            }
             CalcExpr::Eq(l, r) => {
                 let l = self.execute_calculate(*l)?;
                 let r = self.execute_calculate(*r)?;
@@ -664,14 +697,13 @@ impl Runtime {
 
     fn get_var(&self, name: &str) -> Result<(Uuid, Value), RuntimeError> {
         for scope in self.scopes.iter().rev() {
-            if scope.isolate {
-                break;
-            }
             if let Some(uuid) = scope.data.get(name) {
                 if let Some(data_type) = self.data.get(uuid) {
                     let value = data_type.as_variable().unwrap();
                     return Ok((uuid.clone(), value));
                 }
+            }
+            if scope.isolate {
                 break;
             }
         }
@@ -681,61 +713,6 @@ impl Runtime {
     }
 
     fn set_var(&mut self, name: &str, value: Value) -> Result<Uuid, RuntimeError> {
-        // let value = match value {
-        //     Value::List(list) => {
-        //         let mut result = vec![];
-        //         for (i, v) in list.iter().enumerate() {
-        //             if let Value::Reference(_) = v {
-        //                 // ignore
-        //                 result.push(v.clone());
-        //             } else {
-        //                 let name = format!("{name}[{i}]");
-        //                 let id = self.set_var(&name, v.clone())?;
-        //                 result.push(Value::Reference(id));
-        //             }
-        //         }
-        //         Value::List(result)
-        //     }
-        //     Value::Dict(dict) => {
-        //         let mut result = HashMap::new();
-        //         for (k, v) in dict {
-        //             if let Value::Reference(_) = v {
-        //                 // ignore
-        //                 result.insert(k, v);
-        //             } else {
-        //                 let name = format!("{name}[{k}]");
-        //                 let id = self.set_var(&name, v.clone())?;
-        //                 result.insert(k, Value::Reference(id));
-        //             }
-        //         }
-        //         Value::Dict(result)
-        //     }
-        //     Value::Tuple(tuple) => {
-        //         let first = {
-        //             if let Value::Reference(_) = *tuple.0.clone() {
-        //                 // ignore
-        //                 Box::new(*tuple.0)
-        //             } else {
-        //                 let name = format!(".{name}.0");
-        //                 let id = self.set_var(&name, *tuple.0)?;
-        //                 Box::new(Value::Reference(id))
-        //             }
-        //         };
-        //         let second = {
-        //             if let Value::Reference(_) = *tuple.1.clone() {
-        //                 // ignore
-        //                 Box::new(*tuple.1)
-        //             } else {
-        //                 let name = format!(".{name}.1");
-        //                 let id = self.set_var(&name, *tuple.1)?;
-        //                 Box::new(Value::Reference(id))
-        //             }
-        //         };
-        //         Value::Tuple((first, second))
-        //     }
-        //     _ => value,
-        // };
-
         let id = if let Ok((id, _)) = self.get_var(name) {
             let data = self.data.get_mut(&id).unwrap();
             #[allow(unreachable_patterns)]

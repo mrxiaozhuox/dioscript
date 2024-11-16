@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use nom::{
     branch::alt,
     bytes::complete::{
-        escaped, tag, tag_no_case, take_till1, take_until, take_while, take_while1, take_while_m_n,
+        escaped, tag, tag_no_case, take_till1, take_while, take_while1, take_while_m_n,
     },
-    character::complete::{alpha1, alphanumeric1, char, digit1, multispace0, space0, space1},
+    character::complete::{alpha1, alphanumeric1, char, digit1, multispace0, not_line_ending, space0, space1},
     combinator::{map, opt, peek, value},
     error::context,
     multi::{fold_many0, many0, separated_list0, separated_list1},
@@ -603,44 +603,81 @@ impl ElementParser {
         context("element name", take_while1(Self::attr_name_style))(message)
     }
 
-fn parse(message: &str) -> IResult<&str, AstElement> {
-    context(
-        "element",
-        map(
-            pair(
-                terminated(ElementParser::parse_element_name, multispace0),
-                delimited(
-                    tag("{"),
-                    map(
-                        pair(
-                            many0(
-                                alt((
-                                    terminated(
+    fn parse(message: &str) -> IResult<&str, AstElement> {
+        context(
+            "element",
+            map(
+                pair(
+                    terminated(ElementParser::parse_element_name, multispace0),
+                    delimited(
+                        tag("{"),
+                        map(
+                            pair(
+                                many0(
+                                    alt((
+                                        terminated(
+                                            alt((
+                                                map(
+                                                    separated_pair(
+                                                        delimited(
+                                                            multispace0,
+                                                            ElementParser::parse_attr_name,
+                                                            multispace0,
+                                                        ),
+                                                        tag(":"),
+                                                        delimited(multispace0, TypeParser::parse, multispace0),
+                                                    ),
+                                                    |v| AttributeType::Attribute((v.0.to_string(), v.1)),
+                                                ),
+                                                map(
+                                                    delimited(multispace0, CalculateParser::expr, multispace0),
+                                                    |v| AttributeType::InlineExpr(v),
+                                                ),
+                                                map(
+                                                    delimited(multispace0, TypeParser::string, multispace0),
+                                                    |v| AttributeType::Content(v.to_string()),
+                                                ),
+                                            )),
+                                            tag(","),
+                                        ),
                                         alt((
                                             map(
-                                                separated_pair(
-                                                    delimited(
-                                                        multispace0,
-                                                        ElementParser::parse_attr_name,
-                                                        multispace0,
-                                                    ),
-                                                    tag(":"),
-                                                    delimited(multispace0, TypeParser::parse, multispace0),
-                                                ),
-                                                |v| AttributeType::Attribute((v.0.to_string(), v.1)),
+                                                delimited(multispace0, ElementParser::parse, multispace0),
+                                                AttributeType::Element,
                                             ),
                                             map(
-                                                delimited(multispace0, CalculateParser::expr, multispace0),
-                                                |v| AttributeType::InlineExpr(v),
+                                                delimited(multispace0, StatementParser::parse_if, multispace0),
+                                                |v| AttributeType::Condition(v),
                                             ),
                                             map(
-                                                delimited(multispace0, TypeParser::string, multispace0),
-                                                |v| AttributeType::Content(v.to_string()),
+                                                delimited(multispace0, StatementParser::parse_for, multispace0),
+                                                |v| AttributeType::Loop(v),
+                                            ),
+                                            map(
+                                                delimited(multispace0, StatementParser::parse_while, multispace0),
+                                                |v| AttributeType::Loop(v),
                                             ),
                                         )),
-                                        tag(","),
-                                    ),
+                                    ))
+                                ),
+                                opt(
                                     alt((
+                                        map(
+                                            separated_pair(
+                                                delimited(multispace0, ElementParser::parse_attr_name, multispace0),
+                                                tag(":"),
+                                                delimited(multispace0, TypeParser::parse, multispace0),
+                                            ),
+                                            |v| AttributeType::Attribute((v.0.to_string(), v.1)),
+                                        ),
+                                        map(
+                                            delimited(multispace0, CalculateParser::expr, multispace0),
+                                            |v| AttributeType::InlineExpr(v),
+                                        ),
+                                        map(
+                                            delimited(multispace0, TypeParser::string, multispace0),
+                                            |v| AttributeType::Content(v.to_string()),
+                                        ),
                                         map(
                                             delimited(multispace0, ElementParser::parse, multispace0),
                                             AttributeType::Element,
@@ -657,96 +694,59 @@ fn parse(message: &str) -> IResult<&str, AstElement> {
                                             delimited(multispace0, StatementParser::parse_while, multispace0),
                                             |v| AttributeType::Loop(v),
                                         ),
-                                    )),
-                                ))
+                                    ))
+                                )
                             ),
-                            opt(
-                                alt((
-                                    map(
-                                        separated_pair(
-                                            delimited(multispace0, ElementParser::parse_attr_name, multispace0),
-                                            tag(":"),
-                                            delimited(multispace0, TypeParser::parse, multispace0),
-                                        ),
-                                        |v| AttributeType::Attribute((v.0.to_string(), v.1)),
-                                    ),
-                                    map(
-                                        delimited(multispace0, CalculateParser::expr, multispace0),
-                                        |v| AttributeType::InlineExpr(v),
-                                    ),
-                                    map(
-                                        delimited(multispace0, TypeParser::string, multispace0),
-                                        |v| AttributeType::Content(v.to_string()),
-                                    ),
-                                    map(
-                                        delimited(multispace0, ElementParser::parse, multispace0),
-                                        AttributeType::Element,
-                                    ),
-                                    map(
-                                        delimited(multispace0, StatementParser::parse_if, multispace0),
-                                        |v| AttributeType::Condition(v),
-                                    ),
-                                    map(
-                                        delimited(multispace0, StatementParser::parse_for, multispace0),
-                                        |v| AttributeType::Loop(v),
-                                    ),
-                                    map(
-                                        delimited(multispace0, StatementParser::parse_while, multispace0),
-                                        |v| AttributeType::Loop(v),
-                                    ),
-                                ))
-                            )
-                        ),
-                        |(mut attrs, last_attr)| {
-                            if let Some(attr) = last_attr {
-                                attrs.push(attr);
+                            |(mut attrs, last_attr)| {
+                                if let Some(attr) = last_attr {
+                                    attrs.push(attr);
+                                }
+                                attrs
                             }
-                            attrs
-                        }
+                        ),
+                        tag("}"),
                     ),
-                    // 解析闭合大括号
-                    tag("}"),
                 ),
-            ),
-            |(name, attrs)| {
-                let mut attr: HashMap<String, AstValue> = HashMap::new();
-                let mut content = vec![];
-                for a in attrs {
-                    match a {
-                        AttributeType::Attribute((key, value)) => {
-                            attr.insert(key, value);
-                        }
-                        AttributeType::Content(c) => {
-                            content.push(AstElementContentType::Content(c));
-                        }
-                        AttributeType::Element(e) => {
-                            content.push(AstElementContentType::Children(e));
-                        }
-                        AttributeType::InlineExpr(s) => {
-                            content.push(AstElementContentType::InlineExpr(s));
-                        }
-                        AttributeType::Condition(c) => {
-                            content.push(AstElementContentType::Condition(c));
-                        }
-                        AttributeType::Loop(l) => {
-                            content.push(AstElementContentType::Loop(l));
+                |(name, attrs)| {
+                    let mut attr: HashMap<String, AstValue> = HashMap::new();
+                    let mut content = vec![];
+                    for a in attrs {
+                        match a {
+                            AttributeType::Attribute((key, value)) => {
+                                attr.insert(key, value);
+                            }
+                            AttributeType::Content(c) => {
+                                content.push(AstElementContentType::Content(c));
+                            }
+                            AttributeType::Element(e) => {
+                                content.push(AstElementContentType::Children(e));
+                            }
+                            AttributeType::InlineExpr(s) => {
+                                content.push(AstElementContentType::InlineExpr(s));
+                            }
+                            AttributeType::Condition(c) => {
+                                content.push(AstElementContentType::Condition(c));
+                            }
+                            AttributeType::Loop(l) => {
+                                content.push(AstElementContentType::Loop(l));
+                            }
                         }
                     }
-                }
-                AstElement {
-                    name: name.to_string(),
-                    attributes: attr,
-                    content,
-                }
-            },
-        ),
-    )(message)
-}}
+                    AstElement {
+                        name: name.to_string(),
+                        attributes: attr,
+                        content,
+                    }
+                },
+            ),
+        )(message)
+    }
+}
 
 fn comment(message: &str) -> IResult<&str, String> {
     context(
         "Comment",
-        map(preceded(tag("//"), take_until("\n")), |comment: &str| {
+        map(preceded(tag("//"), not_line_ending), |comment: &str| {
             comment.trim().to_string()
         }),
     )(message)
