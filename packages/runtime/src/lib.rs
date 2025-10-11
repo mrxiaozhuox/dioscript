@@ -49,15 +49,13 @@ impl Runtime {
         // let scope = self.root_scope.clone();
 
         let mut module_exporter = HashMap::new();
+
         module_exporter.insert("std".to_string(), stdlib::std().to_module_item());
+
         self.modules = module_exporter;
 
         for path in stdlib::auto_use() {
-            let temp: Vec<String> = path
-                .split("::")
-                .into_iter()
-                .map(|v| v.to_string())
-                .collect();
+            let temp: Vec<String> = path.split("::").map(|v| v.to_string()).collect();
             self.namespace_use
                 .insert(temp.last().unwrap().to_string(), temp);
         }
@@ -156,12 +154,10 @@ impl Runtime {
                             if !result.as_none() {
                                 finish = true;
                             }
-                        } else {
-                            if let Some(otherwise) = otherwise {
-                                result = self.execute_scope(otherwise)?;
-                                if !result.as_none() {
-                                    finish = true;
-                                }
+                        } else if let Some(otherwise) = otherwise {
+                            result = self.execute_scope(otherwise)?;
+                            if !result.as_none() {
+                                finish = true;
                             }
                         }
                     } else {
@@ -333,7 +329,7 @@ impl Runtime {
                 // Set the function parameters in the new scope
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
-                        self.set_var(&v, Value::List(par))?;
+                        self.set_var(v, Value::List(par))?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {
@@ -355,7 +351,7 @@ impl Runtime {
                 // Leave the function scope
                 self.leave_scope();
 
-                return Ok(result);
+                Ok(result)
             }
             types::FunctionType::Rusty((f, need_param_num)) => {
                 if need_param_num != -1 && (par.len() as i32) != need_param_num {
@@ -364,7 +360,7 @@ impl Runtime {
                         provided: par.len() as i16,
                     });
                 }
-                return Ok(f(self, par));
+                Ok(f(self, par))
             }
         }
     }
@@ -384,7 +380,7 @@ impl Runtime {
                 // Set the function parameters in the new scope
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
-                        self.set_var(&v, Value::List(par))?;
+                        self.set_var(v, Value::List(par))?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {
@@ -406,7 +402,7 @@ impl Runtime {
                 // Leave the function scope
                 self.leave_scope();
 
-                return Ok(result);
+                Ok(result)
             }
             types::FunctionType::Rusty((f, need_param_num)) => {
                 if need_param_num != -1 && (par.len() as i32) != need_param_num {
@@ -415,7 +411,7 @@ impl Runtime {
                         provided: par.len() as i16,
                     });
                 }
-                return Ok(f(self, par));
+                Ok(f(self, par))
             }
         }
     }
@@ -451,9 +447,7 @@ impl Runtime {
     fn get_module_value(&self, mut namespace: Vec<String>) -> Result<ModuleItem, RuntimeError> {
         let data = self.load_from_module(namespace.clone());
         match data {
-            Ok(v) => {
-                return Ok(v);
-            }
+            Ok(v) => Ok(v),
             Err(_) => {
                 let v = self.namespace_use.get(&namespace[0]);
                 if let Some(used) = v {
@@ -462,11 +456,11 @@ impl Runtime {
                     }
                     let module_path = used.iter().chain(namespace.iter()).cloned().collect();
                     let v = self.load_from_module(module_path)?;
-                    return Ok(v);
+                    Ok(v)
                 } else {
-                    return Err(RuntimeError::ModuleNotFound {
+                    Err(RuntimeError::ModuleNotFound {
                         module: namespace[0].to_string(),
-                    });
+                    })
                 }
             }
         }
@@ -574,7 +568,7 @@ impl Runtime {
                 let l = self.execute_calculate(*l)?;
                 let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Or)
-            },
+            }
         }
     }
 
@@ -589,7 +583,7 @@ impl Runtime {
                         Value::List(list) => {
                             let index = field.parse::<usize>();
                             if let Ok(index) = index {
-                                if list.len() - 1 >= index {
+                                if list.len() > index {
                                     this = list.get(index).unwrap().clone();
                                 } else {
                                     return Err(RuntimeError::UnknownAttribute {
@@ -692,7 +686,7 @@ impl Runtime {
                 },
             }
         }
-        Ok(self.deref_value(this)?)
+        self.deref_value(this)
     }
 
     fn get_var(&self, name: &str) -> Result<(Uuid, Value), RuntimeError> {
@@ -700,7 +694,7 @@ impl Runtime {
             if let Some(uuid) = scope.data.get(name) {
                 if let Some(data_type) = self.data.get(uuid) {
                     let value = data_type.as_variable().unwrap();
-                    return Ok((uuid.clone(), value));
+                    return Ok((*uuid, value));
                 }
             }
             if scope.isolate {
@@ -725,23 +719,19 @@ impl Runtime {
             id
         } else {
             let id = Uuid::new_v4();
-            let _ = self
-                .data
-                .insert(id, DataType::Variable(value));
+            let _ = self.data.insert(id, DataType::Variable(value));
             if let Some(current_scope) = self.scopes.last_mut() {
                 current_scope.data.insert(name.to_string(), id);
             }
             id
         };
-        return Ok(id);
+        Ok(id)
     }
 
     #[allow(dead_code)]
     fn create_data(&mut self, data: Value) -> Result<Uuid, RuntimeError> {
         let id = Uuid::new_v4();
-        self.data.insert(id, DataType::Variable(
-            data
-        ));
+        self.data.insert(id, DataType::Variable(data));
         Ok(id)
     }
 
@@ -752,8 +742,8 @@ impl Runtime {
                     let num = num as usize;
                     let chars = v.chars();
                     let c = chars.collect::<Vec<char>>();
-                    if c.len() >= num + 1 {
-                        return Ok(Value::String(c[num].to_string()));
+                    if c.len() > num {
+                        Ok(Value::String(c[num].to_string()))
                     } else {
                         Err(RuntimeError::IndexNotFound {
                             index: index.value_name(),
@@ -770,7 +760,7 @@ impl Runtime {
             Value::List(v) => {
                 if let Value::Number(num) = index {
                     let num = num as usize;
-                    if v.len() >= num + 1 {
+                    if v.len() > num {
                         let v = v[num].clone();
                         Ok(v)
                     } else {
@@ -853,10 +843,8 @@ impl Runtime {
                         let mut temp = Value::None;
                         if b {
                             temp = self.execute_scope(v.inner)?;
-                        } else {
-                            if let Some(otherwise) = v.otherwise {
-                                temp = self.execute_scope(otherwise)?;
-                            }
+                        } else if let Some(otherwise) = v.otherwise {
+                            temp = self.execute_scope(otherwise)?;
                         }
                         if let Value::Tuple((k, v)) = &temp {
                             if let Value::String(k) = *k.clone() {
@@ -945,6 +933,12 @@ impl Runtime {
     }
 }
 
+impl Default for Runtime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub struct Scope {
     isolate: bool,
@@ -981,4 +975,3 @@ impl DataType {
         None
     }
 }
-

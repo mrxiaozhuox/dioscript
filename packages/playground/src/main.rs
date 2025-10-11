@@ -8,42 +8,49 @@ fn main() {
 
 #[allow(non_snake_case)]
 pub fn App() -> Element {
-
-    let eval = eval(indoc! {"
-        setTimeout(() => {
-            let editor = window.editor;
-            editor.onDidChangeModelContent(function (_e) {
-                let content = editor.getValue();
-                dioxus.send(content);
-            });
-        }, 800);
-    "});
-
-    let editor_content = use_signal(|| {
-        String::from("return div { \"hello dioscript!\" };")
-    });
+    let editor_content = use_signal(|| String::from("return div { \"hello dioscript!\" };"));
     let _ = use_resource(move || {
-        to_owned![eval, editor_content];
+        to_owned![editor_content];
         async move {
+            let mut eval = dioxus::document::eval(indoc! {"
+            setTimeout(() => {
+                let editor = window.editor;
+                editor.onDidChangeModelContent(function (_e) {
+                    let content = editor.getValue();
+                    dioxus.send(content);
+                });
+            }, 800);
+        "});
             #[allow(irrefutable_let_patterns)]
-            while let v = eval.recv().await {
+            while let v = eval.recv::<String>().await {
                 match v {
                     Ok(v) => {
-                        editor_content.set(v.as_str().unwrap().to_string());
-                    },
-                    Err(_e) => {},
+                        editor_content.set(v);
+                    }
+                    Err(_e) => {}
                 }
             }
         }
     });
-   
+
     let mut display_result = use_signal(|| 0);
 
+    let editor_script = indoc! {"
+        import * as monaco from 'https://cdn.jsdelivr.net/npm/monaco-editor@0.39.0/+esm';
+
+        window.editor = monaco.editor.create(document.querySelector('#monaco'), {
+        value: ['return div { \"hello dioscript!\" };'].join('\\n'),
+        fontSize: 13,
+        });
+    "};
+
     rsx! {
+
         script {
             r#type: "module",
-            src: "/editor.js"
+            { editor_script }
         }
+
         div {
             class: "mt-4 mx-auto px-8",
             div {
@@ -53,7 +60,7 @@ pub fn App() -> Element {
                 }
                 div {
                     class: "basis-1/2",
-                    button { 
+                    button {
                         class: "bg-cyan-500 hover:bg-cyan-700 text-white font-semibold text-sm py-2 px-3 rounded",
                         onclick: move |_| { display_result.set(0); },
                         "Result"
@@ -61,12 +68,12 @@ pub fn App() -> Element {
                     button {
                         class: "bg-emerald-500 hover:bg-emerald-700 text-white font-semibold text-sm ml-2 py-2 px-3 rounded",
                         onclick: move |_| { display_result.set(1); },
-                        "AST Tree"   
+                        "AST Tree"
                     }
                     button {
                         class: "bg-emerald-500 hover:bg-emerald-700 text-white font-semibold text-sm ml-2 py-2 px-3 rounded",
                         onclick: move |_| { display_result.set(2); },
-                        "Using Namespace"   
+                        "Using Namespace"
                     }
                 }
             }
@@ -84,10 +91,10 @@ pub fn App() -> Element {
                     div {
                         class: "w-full h-[700px] border border-gray-400",
                         div {
-                            class: "mt-1 px-4 py-4",    
+                            class: "mt-1 px-4 py-4",
                             if *display_result.read() == 0 {
                                 View {
-                                  code: editor_content.to_string(),  
+                                  code: editor_content.to_string(),
                                 }
                             } else if *display_result.read() == 1 {
                                 AstView { code: editor_content.to_string() }

@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 dsx = { path = "../dsx" }
-dioxus = { version = "0.5.6", features = ["router", "web"] }
+dioxus = { version = "0.6.3", features = ["router", "web"] }
 js-sys = "0.3"
 indoc = "2.0.4"

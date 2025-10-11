@@ -25,7 +25,7 @@ pub fn View(code: String) -> Element {
             rsx! {
                 div { class: "font-semibold", "Error: {message}" }
             }
-        },
+        }
     }
 }
 
@@ -48,9 +48,8 @@ pub fn AstView(code: String) -> Element {
             rsx! {
                 div { class: "font-semibold", "Error: {message}" }
             }
-        },
+        }
     }
-
 }
 
 #[allow(non_snake_case)]
@@ -74,6 +73,6 @@ pub fn NamespaceView(code: String) -> Element {
             rsx! {
                 div { class: "font-semibold", "Error: {message}" }
             }
-        },
+        }
     }
 }
