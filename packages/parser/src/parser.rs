@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use nom::{
     branch::alt,
     bytes::complete::{
-        escaped, tag, tag_no_case, take_till1, take_while, take_while1, take_while_m_n,
+        escaped, escaped_transform, tag, tag_no_case, take, take_till, take_till1, take_while,
+        take_while1, take_while_m_n,
     },
     character::complete::{
         alpha1, alphanumeric1, char, digit1, multispace0, not_line_ending, space0, space1,
@@ -67,51 +68,30 @@ pub enum LinkExprPart {
 
 struct TypeParser;
 impl TypeParser {
-    fn normal(message: &str) -> IResult<&str, &str> {
-        take_till1(|c: char| c == '\\' || c == '"' || c.is_ascii_control())(message)
-    }
+    // string
 
-    fn escapable(i: &str) -> IResult<&str, &str> {
-        context(
-            "escaped",
+    pub fn string(i: &str) -> IResult<&str, String> {
+        let string_content = escaped_transform(
+            take_till1(|c: char| c == '\\' || c == '"' || c.is_ascii_control()),
+            '\\',
             alt((
-                tag("\""),
-                tag("\\"),
-                tag("/"),
-                tag("b"),
-                tag("f"),
-                tag("n"),
-                tag("r"),
-                tag("t"),
-                TypeParser::parse_hex,
+                value("\"", tag("\"")),
+                value("\\", tag("\\")),
+                value("/", tag("/")),
+                value("\u{0008}", tag("b")),
+                value("\u{000C}", tag("f")),
+                value("\n", tag("n")),
+                value("\r", tag("r")),
+                value("\t", tag("t")),
+                // 处理任何其他转义字符，只保留字符本身
+                map(take(1u8), |c: &str| c),
             )),
-        )(i)
+        );
+
+        context("string", delimited(char('"'), string_content, char('"')))(i)
     }
 
-    fn string_format(message: &str) -> IResult<&str, &str> {
-        escaped(TypeParser::normal, '\\', TypeParser::escapable)(message)
-    }
-
-    fn parse_hex(message: &str) -> IResult<&str, &str> {
-        context(
-            "hex string",
-            preceded(
-                peek(tag("u")),
-                take_while_m_n(5, 5, |c: char| c.is_ascii_hexdigit() || c == 'u'),
-            ),
-        )(message)
-    }
-
-    pub fn string(message: &str) -> IResult<&str, &str> {
-        context(
-            "string",
-            alt((
-                tag("\"\""),
-                delimited(tag("\""), TypeParser::string_format, tag("\"")),
-            )),
-        )(message)
-    }
-
+    // boolean
     pub fn boolean(message: &str) -> IResult<&str, bool> {
         let parse_true = value(true, tag_no_case("true"));
         let parse_false = value(false, tag_no_case("false"));
@@ -170,12 +150,7 @@ impl TypeParser {
                             delimited(multispace0, TypeParser::parse, multispace0),
                         ),
                     ),
-                    |tuple_vec: Vec<(&str, AstValue)>| {
-                        tuple_vec
-                            .into_iter()
-                            .map(|(k, v)| (String::from(k), v))
-                            .collect()
-                    },
+                    |tuple_vec: Vec<(String, AstValue)>| tuple_vec.into_iter().collect(),
                 ),
                 delimited(opt(tag(",")), multispace0, tag("}")),
             ),
@@ -437,7 +412,7 @@ impl FunctionParser {
             map(
                 tuple((
                     terminated(
-                        map(VariableParser::parse_var_name, |v| FunctionName::Single(v)),
+                        map(VariableParser::parse_var_name, FunctionName::Single),
                         tag("("),
                     ),
                     delimited(

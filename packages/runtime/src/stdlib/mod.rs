@@ -129,18 +129,46 @@ mod string {
 
 mod number {
 
+    use core::f64;
+
     use crate::{module::ModuleGenerator, types::Value, Runtime};
 
     pub fn abs(_rt: &mut Runtime, args: Vec<Value>) -> Value {
-        let num = args.get(0).unwrap().as_number().unwrap();
+        let num = args.first().unwrap().as_number().unwrap();
         Value::Number(num.abs())
+    }
+
+    pub fn max(_rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let mut max = f64::MIN;
+        for arg in args {
+            if let Value::Number(num) = arg {
+                if num > max {
+                    max = num;
+                }
+            }
+        }
+        Value::Number(max)
+    }
+
+    pub fn min(_rt: &mut Runtime, args: Vec<Value>) -> Value {
+        let mut min = f64::MAX;
+        for arg in args {
+            if let Value::Number(num) = arg {
+                if num < min {
+                    min = num;
+                }
+            }
+        }
+        Value::Number(min)
     }
 
     pub fn export() -> ModuleGenerator {
         let mut module = ModuleGenerator::new();
-        
+
         module.insert_rusty_function("abs", abs, 1);
-        
+        module.insert_rusty_function("max", max, -1);
+        module.insert_rusty_function("min", min, -1);
+
         module
     }
 }
@@ -153,6 +181,6 @@ pub fn std() -> ModuleGenerator {
 }
 
 pub fn auto_use() -> Vec<String> {
-    let v = vec!["std::print", "std::println", "std::type", "std::execute"];
+    let v = ["std::print", "std::println", "std::type", "std::execute"];
     v.iter().map(|v| v.to_string()).collect()
 }
