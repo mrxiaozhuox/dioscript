@@ -1,7 +1,11 @@
-use nom::Finish;
+use std::fmt::Display;
+
+use nom::{combinator::all_consuming, Finish};
 
 use crate::{
-    error::ParseError, parser::{parse_rsx, CalcExpr}, types::AstValue
+    error::ParseError,
+    parser::{parse_rsx, CalcExpr},
+    types::AstValue,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11,7 +15,8 @@ pub struct DioscriptAst {
 
 impl DioscriptAst {
     pub fn from_string(message: &str) -> Result<Self, ParseError> {
-        let v = parse_rsx(message).finish();
+        let v = all_consuming(parse_rsx)(message).finish();
+        println!("{:?}", v);
         if let Ok((text, ast)) = v {
             if text.trim().is_empty() {
                 Ok(DioscriptAst { stats: ast })
@@ -23,10 +28,8 @@ impl DioscriptAst {
             }
         } else {
             let err = v.err().unwrap();
-            Err(ParseError::ParseFailure {
-                kind: err.code,
-                text: err.input.to_string(),
-            })
+            let err = nom::error::convert_error(message, err);
+            Err(ParseError::ParseFailure { text: err })
         }
     }
 }
@@ -54,7 +57,7 @@ pub struct VariableDefine {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionCall {
     pub name: FunctionName,
-    pub arguments: Vec<AstValue>,
+    pub arguments: Vec<CalcExpr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,12 +66,13 @@ pub enum FunctionName {
     Namespace(Vec<String>),
 }
 
-impl ToString for FunctionName {
-    fn to_string(&self) -> String {
-        match self {
+impl Display for FunctionName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let res = match self {
             FunctionName::Single(s) => s.to_string(),
             FunctionName::Namespace(n) => n.join("::"),
-        }
+        };
+        write!(f, "{}", res)
     }
 }
 

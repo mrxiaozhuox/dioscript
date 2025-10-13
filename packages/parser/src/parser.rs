@@ -8,8 +8,8 @@ use nom::{
     character::complete::{
         alpha1, alphanumeric1, char, digit1, multispace0, not_line_ending, space0, space1,
     },
-    combinator::{map, opt, value},
-    error::context,
+    combinator::{cut, map, opt, peek, value},
+    error::{context, VerboseError},
     multi::{fold_many0, many0, separated_list0, separated_list1},
     number::complete::double,
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
@@ -65,11 +65,13 @@ pub enum LinkExprPart {
     FunctionCall(FunctionCall),
 }
 
+type ParserResult<'a, T> = IResult<&'a str, T, VerboseError<&'a str>>;
+
 struct TypeParser;
 impl TypeParser {
     // string
 
-    pub fn string(i: &str) -> IResult<&str, String> {
+    pub fn string(i: &str) -> ParserResult<String> {
         let string_content = escaped_transform(
             take_till1(|c: char| c == '\\' || c == '"' || c.is_ascii_control()),
             '\\',
@@ -90,51 +92,51 @@ impl TypeParser {
     }
 
     // boolean
-    pub fn boolean(message: &str) -> IResult<&str, bool> {
+    pub fn boolean(message: &str) -> ParserResult<bool> {
         let parse_true = value(true, tag_no_case("true"));
         let parse_false = value(false, tag_no_case("false"));
         alt((parse_true, parse_false))(message)
     }
 
-    pub fn number(message: &str) -> IResult<&str, f64> {
+    pub fn number(message: &str) -> ParserResult<f64> {
         double(message)
     }
 
-    pub fn list(message: &str) -> IResult<&str, Vec<AstValue>> {
+    pub fn list(message: &str) -> ParserResult<Vec<CalcExpr>> {
         context(
             "list",
             delimited(
                 tag("["),
                 separated_list0(
                     tag(","),
-                    delimited(multispace0, TypeParser::parse, multispace0),
+                    delimited(multispace0, CalculateParser::expr, multispace0),
                 ),
                 delimited(opt(tag(",")), multispace0, tag("]")),
             ),
         )(message)
     }
 
-    fn variable(message: &str) -> IResult<&str, String> {
+    fn variable(message: &str) -> ParserResult<String> {
         context(
             "variable",
             map(VariableParser::parse_var_name, |v| v.to_string()),
         )(message)
     }
 
-    fn variable_index(message: &str) -> IResult<&str, (String, Box<AstValue>)> {
+    fn variable_index(message: &str) -> ParserResult<(String, Box<CalcExpr>)> {
         context(
             "variable index",
             map(
                 tuple((
                     VariableParser::parse_var_name,
-                    delimited(tag("["), TypeParser::parse_index_type, tag("]")),
+                    delimited(tag("["), CalculateParser::expr, tag("]")),
                 )),
                 |v| (v.0.to_string(), Box::new(v.1)),
             ),
         )(message)
     }
 
-    fn dict(message: &str) -> IResult<&str, HashMap<String, AstValue>> {
+    fn dict(message: &str) -> ParserResult<HashMap<String, CalcExpr>> {
         context(
             "object",
             delimited(
@@ -145,46 +147,35 @@ impl TypeParser {
                         separated_pair(
                             delimited(multispace0, TypeParser::string, multispace0),
                             tag(":"),
-                            delimited(multispace0, TypeParser::parse, multispace0),
+                            delimited(multispace0, CalculateParser::expr, multispace0),
                         ),
                     ),
-                    |tuple_vec: Vec<(String, AstValue)>| tuple_vec.into_iter().collect(),
+                    |tuple_vec: Vec<(String, CalcExpr)>| tuple_vec.into_iter().collect(),
                 ),
                 delimited(opt(tag(",")), multispace0, tag("}")),
             ),
         )(message)
     }
 
-    fn tuple(message: &str) -> IResult<&str, (Box<AstValue>, Box<AstValue>)> {
+    fn tuple(message: &str) -> ParserResult<(Box<CalcExpr>, Box<CalcExpr>)> {
         context(
             "tuple",
             delimited(
                 tag("("),
                 map(
                     separated_pair(
-                        delimited(multispace0, TypeParser::parse, multispace0),
+                        delimited(multispace0, CalculateParser::expr, multispace0),
                         tag(","),
-                        delimited(multispace0, TypeParser::parse, multispace0),
+                        delimited(multispace0, CalculateParser::expr, multispace0),
                     ),
-                    |pair: (AstValue, AstValue)| (Box::new(pair.0), Box::new(pair.1)),
+                    |pair: (CalcExpr, CalcExpr)| (Box::new(pair.0), Box::new(pair.1)),
                 ),
                 tag(")"),
             ),
         )(message)
     }
 
-    fn parse_index_type(message: &str) -> IResult<&str, AstValue> {
-        context(
-            "value",
-            alt((
-                map(TypeParser::number, AstValue::Number),
-                map(TypeParser::string, AstValue::String),
-                map(TypeParser::variable, AstValue::Variable),
-            )),
-        )(message)
-    }
-
-    pub fn parse(message: &str) -> IResult<&str, AstValue> {
+    pub fn parse(message: &str) -> ParserResult<AstValue> {
         context(
             "value",
             alt((
@@ -206,7 +197,7 @@ impl TypeParser {
 
 struct VariableParser;
 impl VariableParser {
-    fn parse_var_name(message: &str) -> IResult<&str, String> {
+    fn parse_var_name(message: &str) -> ParserResult<String> {
         context(
             "var name",
             map(
@@ -219,7 +210,7 @@ impl VariableParser {
         )(message)
     }
 
-    fn parse(message: &str) -> IResult<&str, VariableDefine> {
+    fn parse(message: &str) -> ParserResult<VariableDefine> {
         context(
             "variable",
             map(
@@ -241,7 +232,7 @@ impl VariableParser {
 
 struct CalculateParser;
 impl CalculateParser {
-    fn factor(input: &str) -> IResult<&str, CalcExpr> {
+    fn factor(input: &str) -> ParserResult<CalcExpr> {
         delimited(
             space0,
             alt((
@@ -253,7 +244,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn link(input: &str) -> IResult<&str, LinkExpr> {
+    fn link(input: &str) -> ParserResult<LinkExpr> {
         delimited(
             space0,
             map(
@@ -285,7 +276,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn term(input: &str) -> IResult<&str, CalcExpr> {
+    fn term(input: &str) -> ParserResult<CalcExpr> {
         let (input, init) = Self::factor(input)?;
         fold_many0(
             pair(
@@ -302,7 +293,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn add_sub(input: &str) -> IResult<&str, CalcExpr> {
+    fn add_sub(input: &str) -> ParserResult<CalcExpr> {
         let (input, init) = Self::term(input)?;
         fold_many0(
             pair(
@@ -318,7 +309,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn comparison(input: &str) -> IResult<&str, CalcExpr> {
+    fn comparison(input: &str) -> ParserResult<CalcExpr> {
         let (input, init) = Self::add_sub(input)?;
         fold_many0(
             pair(
@@ -349,7 +340,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn logical_and(input: &str) -> IResult<&str, CalcExpr> {
+    fn logical_and(input: &str) -> ParserResult<CalcExpr> {
         let (input, init) = Self::comparison(input)?;
         fold_many0(
             pair(delimited(space0, tag("&&"), space0), Self::comparison),
@@ -358,7 +349,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn logical_or(input: &str) -> IResult<&str, CalcExpr> {
+    fn logical_or(input: &str) -> ParserResult<CalcExpr> {
         let (input, init) = Self::logical_and(input)?;
         fold_many0(
             pair(delimited(space0, tag("||"), space0), Self::logical_and),
@@ -367,14 +358,14 @@ impl CalculateParser {
         )(input)
     }
 
-    fn expr(input: &str) -> IResult<&str, CalcExpr> {
-        Self::logical_or(input)
+    fn expr(input: &str) -> ParserResult<CalcExpr> {
+        context("calculate expr", Self::logical_or)(input)
     }
 }
 
 struct FunctionParser;
 impl FunctionParser {
-    fn call(message: &str) -> IResult<&str, FunctionCall> {
+    fn call(message: &str) -> ParserResult<FunctionCall> {
         context(
             "function call",
             map(
@@ -394,7 +385,7 @@ impl FunctionParser {
                     ),
                     delimited(
                         space0,
-                        separated_list0(tag(","), delimited(space0, TypeParser::parse, space0)),
+                        separated_list0(tag(","), delimited(space0, CalculateParser::expr, space0)),
                         space0,
                     ),
                     tag(")"),
@@ -404,7 +395,7 @@ impl FunctionParser {
         )(message)
     }
 
-    fn call_single_name(message: &str) -> IResult<&str, FunctionCall> {
+    fn call_single_name(message: &str) -> ParserResult<FunctionCall> {
         context(
             "function call single",
             map(
@@ -415,7 +406,7 @@ impl FunctionParser {
                     ),
                     delimited(
                         space0,
-                        separated_list0(tag(","), delimited(space0, TypeParser::parse, space0)),
+                        separated_list0(tag(","), delimited(space0, CalculateParser::expr, space0)),
                         space0,
                     ),
                     tag(")"),
@@ -425,7 +416,7 @@ impl FunctionParser {
         )(message)
     }
 
-    fn define(message: &str) -> IResult<&str, FunctionDefine> {
+    fn define(message: &str) -> ParserResult<FunctionDefine> {
         context(
             "function define",
             map(
@@ -462,19 +453,28 @@ impl FunctionParser {
 
 struct StatementParser;
 impl StatementParser {
-    fn parse_if(message: &str) -> IResult<&str, ConditionalStatement> {
+    fn parse_if(message: &str) -> ParserResult<ConditionalStatement> {
         context(
             "if statment",
             map(
                 tuple((
-                    pair(tag("if"), space1),
-                    terminated(CalculateParser::expr, pair(space0, tag("{"))),
-                    delimited(multispace0, parse_rsx, pair(multispace0, tag("}"))),
+                    context("if keyword", pair(tag("if"), space1)),
+                    context(
+                        "condition expr",
+                        terminated(CalculateParser::expr, pair(space0, tag("{"))),
+                    ),
+                    context(
+                        "if body",
+                        delimited(multispace0, parse_rsx, pair(multispace0, tag("}"))),
+                    ),
                     opt(delimited(
-                        delimited(
-                            space0,
-                            tag("else"),
-                            delimited(space0, tag("{"), multispace0),
+                        context(
+                            "else keyword",
+                            delimited(
+                                space0,
+                                tag("else"),
+                                delimited(space0, tag("{"), multispace0),
+                            ),
                         ),
                         parse_rsx,
                         pair(multispace0, tag("}")),
@@ -488,7 +488,7 @@ impl StatementParser {
             ),
         )(message)
     }
-    fn parse_for(message: &str) -> IResult<&str, LoopStatement> {
+    fn parse_for(message: &str) -> ParserResult<LoopStatement> {
         context(
             "for statement",
             map(
@@ -508,7 +508,7 @@ impl StatementParser {
             ),
         )(message)
     }
-    fn parse_while(message: &str) -> IResult<&str, LoopStatement> {
+    fn parse_while(message: &str) -> ParserResult<LoopStatement> {
         context(
             "while statement",
             map(
@@ -532,11 +532,11 @@ impl ModuleParser {
         matches!(c, 'a'..='z' | '_')
     }
 
-    fn parse_module_name(message: &str) -> IResult<&str, &str> {
+    fn parse_module_name(message: &str) -> ParserResult<&str> {
         context("module name", take_while1(Self::module_name_style))(message)
     }
 
-    fn parse_use(message: &str) -> IResult<&str, UseStatement> {
+    fn parse_use(message: &str) -> ParserResult<UseStatement> {
         context(
             "use statement",
             map(
@@ -553,7 +553,7 @@ impl ModuleParser {
 
 struct ElementParser;
 impl ElementParser {
-    fn parse_element_name(message: &str) -> IResult<&str, &str> {
+    fn parse_element_name(message: &str) -> ParserResult<&str> {
         context("element name", alphanumeric1)(message)
     }
 
@@ -561,61 +561,128 @@ impl ElementParser {
         matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '-')
     }
 
-    fn parse_attr_name(message: &str) -> IResult<&str, &str> {
+    fn parse_attr_name(message: &str) -> ParserResult<&str> {
         context("element name", take_while1(Self::attr_name_style))(message)
     }
 
-    fn parse(message: &str) -> IResult<&str, AstElement> {
+    fn parse(message: &str) -> ParserResult<AstElement> {
         context(
             "element",
             map(
                 pair(
-                    terminated(ElementParser::parse_element_name, multispace0),
-                    delimited(
-                        tag("{"),
-                        map(
-                            pair(
-                                many0(alt((
-                                    terminated(
+                    context(
+                        "element name",
+                        terminated(ElementParser::parse_element_name, multispace0),
+                    ),
+                    context(
+                        "attributes",
+                        delimited(
+                            tag("{"),
+                            map(
+                                pair(
+                                    many0(alt((
+                                        terminated(
+                                            alt((
+                                                map(
+                                                    context(
+                                                        "attribute pair",
+                                                        separated_pair(
+                                                            delimited(
+                                                                multispace0,
+                                                                ElementParser::parse_attr_name,
+                                                                multispace0,
+                                                            ),
+                                                            tag(":"),
+                                                            delimited(
+                                                                multispace0,
+                                                                TypeParser::parse,
+                                                                multispace0,
+                                                            ),
+                                                        ),
+                                                    ),
+                                                    |v| {
+                                                        AttributeType::Attribute((
+                                                            v.0.to_string(),
+                                                            v.1,
+                                                        ))
+                                                    },
+                                                ),
+                                                // include type parser and calculate
+                                                map(
+                                                    delimited(
+                                                        multispace0,
+                                                        CalculateParser::expr,
+                                                        multispace0,
+                                                    ),
+                                                    AttributeType::InlineExpr,
+                                                ),
+                                            )),
+                                            tag(","),
+                                        ),
                                         alt((
                                             map(
-                                                separated_pair(
-                                                    delimited(
-                                                        multispace0,
-                                                        ElementParser::parse_attr_name,
-                                                        multispace0,
-                                                    ),
-                                                    tag(":"),
-                                                    delimited(
-                                                        multispace0,
-                                                        TypeParser::parse,
-                                                        multispace0,
-                                                    ),
+                                                delimited(
+                                                    multispace0,
+                                                    ElementParser::parse,
+                                                    multispace0,
                                                 ),
-                                                |v| {
-                                                    AttributeType::Attribute((v.0.to_string(), v.1))
-                                                },
+                                                AttributeType::Element,
                                             ),
                                             map(
                                                 delimited(
                                                     multispace0,
-                                                    CalculateParser::expr,
+                                                    StatementParser::parse_if,
                                                     multispace0,
                                                 ),
-                                                AttributeType::InlineExpr,
+                                                AttributeType::Condition,
                                             ),
                                             map(
                                                 delimited(
                                                     multispace0,
-                                                    TypeParser::string,
+                                                    StatementParser::parse_for,
                                                     multispace0,
                                                 ),
-                                                |v| AttributeType::Content(v.to_string()),
+                                                AttributeType::Loop,
+                                            ),
+                                            map(
+                                                delimited(
+                                                    multispace0,
+                                                    StatementParser::parse_while,
+                                                    multispace0,
+                                                ),
+                                                AttributeType::Loop,
                                             ),
                                         )),
-                                        tag(","),
-                                    ),
-                                    alt((
+                                    ))),
+                                    opt(alt((
+                                        map(
+                                            separated_pair(
+                                                delimited(
+                                                    multispace0,
+                                                    ElementParser::parse_attr_name,
+                                                    multispace0,
+                                                ),
+                                                tag(":"),
+                                                delimited(
+                                                    multispace0,
+                                                    TypeParser::parse,
+                                                    multispace0,
+                                                ),
+                                            ),
+                                            |v| AttributeType::Attribute((v.0.to_string(), v.1)),
+                                        ),
+                                        map(
+                                            delimited(
+                                                multispace0,
+                                                CalculateParser::expr,
+                                                multispace0,
+                                            ),
+                                            AttributeType::InlineExpr,
+                                        ),
+                                        map(
+                                            delimited(multispace0, TypeParser::string, multispace0),
+                                            |v| AttributeType::Content(v.to_string()),
+                                        ),
                                         map(
                                             delimited(
                                                 multispace0,
@@ -648,67 +715,17 @@ impl ElementParser {
                                             ),
                                             AttributeType::Loop,
                                         ),
-                                    )),
-                                ))),
-                                opt(alt((
-                                    map(
-                                        separated_pair(
-                                            delimited(
-                                                multispace0,
-                                                ElementParser::parse_attr_name,
-                                                multispace0,
-                                            ),
-                                            tag(":"),
-                                            delimited(multispace0, TypeParser::parse, multispace0),
-                                        ),
-                                        |v| AttributeType::Attribute((v.0.to_string(), v.1)),
-                                    ),
-                                    map(
-                                        delimited(multispace0, CalculateParser::expr, multispace0),
-                                        AttributeType::InlineExpr,
-                                    ),
-                                    map(
-                                        delimited(multispace0, TypeParser::string, multispace0),
-                                        |v| AttributeType::Content(v.to_string()),
-                                    ),
-                                    map(
-                                        delimited(multispace0, ElementParser::parse, multispace0),
-                                        AttributeType::Element,
-                                    ),
-                                    map(
-                                        delimited(
-                                            multispace0,
-                                            StatementParser::parse_if,
-                                            multispace0,
-                                        ),
-                                        AttributeType::Condition,
-                                    ),
-                                    map(
-                                        delimited(
-                                            multispace0,
-                                            StatementParser::parse_for,
-                                            multispace0,
-                                        ),
-                                        AttributeType::Loop,
-                                    ),
-                                    map(
-                                        delimited(
-                                            multispace0,
-                                            StatementParser::parse_while,
-                                            multispace0,
-                                        ),
-                                        AttributeType::Loop,
-                                    ),
-                                ))),
+                                    ))),
+                                ),
+                                |(mut attrs, last_attr)| {
+                                    if let Some(attr) = last_attr {
+                                        attrs.push(attr);
+                                    }
+                                    attrs
+                                },
                             ),
-                            |(mut attrs, last_attr)| {
-                                if let Some(attr) = last_attr {
-                                    attrs.push(attr);
-                                }
-                                attrs
-                            },
+                            tag("}"),
                         ),
-                        tag("}"),
                     ),
                 ),
                 |(name, attrs)| {
@@ -747,7 +764,7 @@ impl ElementParser {
     }
 }
 
-fn comment(message: &str) -> IResult<&str, String> {
+fn comment(message: &str) -> ParserResult<String> {
     context(
         "Comment",
         map(preceded(tag("//"), not_line_ending), |comment: &str| {
@@ -756,7 +773,7 @@ fn comment(message: &str) -> IResult<&str, String> {
     )(message)
 }
 
-pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
+pub(crate) fn parse_rsx(message: &str) -> ParserResult<Vec<DioAstStatement>> {
     context(
         "AST Full",
         many0(delimited(
@@ -765,7 +782,7 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
                 map(comment, DioAstStatement::LineComment),
                 map(VariableParser::parse, DioAstStatement::VariableAss),
                 map(
-                    delimited(tag("return "), CalculateParser::expr, tag(";")),
+                    delimited(cut(tag("return ")), CalculateParser::expr, tag(";")),
                     DioAstStatement::ReturnValue,
                 ),
                 map(

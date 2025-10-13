@@ -229,7 +229,7 @@ impl Runtime {
             AstValue::List(v) => {
                 let mut res = Vec::new();
                 for i in v {
-                    let value = self.to_value(i)?;
+                    let value = self.execute_calculate(i)?;
                     res.push(value);
                 }
                 Ok(Value::List(res))
@@ -237,13 +237,13 @@ impl Runtime {
             AstValue::Dict(v) => {
                 let mut res = HashMap::new();
                 for (k, v) in v {
-                    res.insert(k, self.to_value(v)?);
+                    res.insert(k, self.execute_calculate(v)?);
                 }
                 Ok(Value::Dict(res))
             }
             AstValue::Tuple((a, b)) => {
-                let a = self.to_value(*a)?;
-                let b = self.to_value(*b)?;
+                let a = self.execute_calculate(*a)?;
+                let b = self.execute_calculate(*b)?;
                 Ok(Value::Tuple((Box::new(a), Box::new(b))))
             }
             AstValue::Element(e) => {
@@ -256,7 +256,7 @@ impl Runtime {
             }
             AstValue::VariableIndex((n, i)) => {
                 let value = self.to_value(AstValue::Variable(n))?;
-                let index = self.to_value(*i)?;
+                let index = self.execute_calculate(*i)?;
                 let data = self.get_from_index(value, index)?;
                 Ok(data)
             }
@@ -317,7 +317,7 @@ impl Runtime {
         let params = caller.arguments;
         let mut par = vec![];
         for i in params {
-            let v = self.to_value(i)?;
+            let v = self.execute_calculate(i)?;
             par.push(v);
         }
 
@@ -666,7 +666,7 @@ impl Runtime {
                     Value::String(content) => {
                         let mut pararms = vec![Value::String(content.to_string())];
                         for i in call.arguments {
-                            let v = self.to_value(i)?;
+                            let v = self.execute_calculate(i)?;
                             pararms.push(v);
                         }
                         let v = self.get_var("string")?.1;

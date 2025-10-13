@@ -60,11 +60,7 @@ impl Value {
     }
 
     pub fn as_none(&self) -> bool {
-        if let Self::None = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::None)
     }
 
     pub fn as_string(&self) -> Option<String> {
@@ -133,6 +129,16 @@ impl Value {
 
     pub fn calc(&self, o: &Value, s: CalculateMark) -> Result<Value, RuntimeError> {
         if self.value_name() != o.value_name() {
+            if let CalculateMark::Plus = s {
+                // string plus number or number pls string
+                if (self.value_name() == "string" && o.value_name() == "number")
+                    || (self.value_name() == "number" && o.value_name() == "string")
+                {
+                    let result = self.to_string() + &o.to_string();
+                    return Ok(Self::String(result));
+                }
+            }
+
             return Err(RuntimeError::CompareDiffType {
                 a: self.value_name(),
                 b: o.value_name(),

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::{
     ast::{FunctionCall, FunctionDefine},
     element::AstElement,
+    parser::CalcExpr,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11,12 +12,12 @@ pub enum AstValue {
     String(String),
     Number(f64),
     Boolean(bool),
-    List(Vec<AstValue>),
-    Dict(HashMap<String, AstValue>),
-    Tuple((Box<AstValue>, Box<AstValue>)),
+    List(Vec<CalcExpr>),
+    Dict(HashMap<String, CalcExpr>),
+    Tuple((Box<CalcExpr>, Box<CalcExpr>)),
     Element(AstElement),
     Variable(String),
-    VariableIndex((String, Box<AstValue>)),
+    VariableIndex((String, Box<CalcExpr>)),
     FunctionCaller(FunctionCall),
     FunctionDefine(FunctionDefine),
 }
@@ -68,7 +69,7 @@ impl AstValue {
         }
     }
 
-    pub fn as_list(&self) -> Option<Vec<AstValue>> {
+    pub fn as_list(&self) -> Option<Vec<CalcExpr>> {
         if let Self::List(v) = self {
             Some(v.clone())
         } else {
@@ -76,7 +77,7 @@ impl AstValue {
         }
     }
 
-    pub fn as_dict(&self) -> Option<HashMap<String, AstValue>> {
+    pub fn as_dict(&self) -> Option<HashMap<String, CalcExpr>> {
         if let Self::Dict(v) = self {
             Some(v.clone())
         } else {
@@ -84,7 +85,7 @@ impl AstValue {
         }
     }
 
-    pub fn as_tuple(&self) -> Option<(Box<AstValue>, Box<AstValue>)> {
+    pub fn as_tuple(&self) -> Option<(Box<CalcExpr>, Box<CalcExpr>)> {
         if let Self::Tuple(v) = self {
             Some(v.clone())
         } else {
