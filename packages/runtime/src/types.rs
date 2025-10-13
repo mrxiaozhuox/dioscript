@@ -139,7 +139,7 @@ impl Value {
             });
         }
 
-        return match s {
+        match s {
             CalculateMark::Plus => match self {
                 Value::String(v) => Ok(Self::String(format!("{}{}", v, o.as_string().unwrap()))),
                 Value::Number(v) => Ok(Self::Number(v + o.as_number().unwrap())),
@@ -171,7 +171,7 @@ impl Value {
             },
 
             CalculateMark::Equal => match self {
-                Value::String(v) => Ok(Value::Boolean(v.to_string() == o.as_string().unwrap())),
+                Value::String(v) => Ok(Value::Boolean(*v == o.as_string().unwrap())),
                 Value::Number(v) => Ok(Value::Boolean(*v == o.as_number().unwrap())),
                 Value::Boolean(v) => Ok(Value::Boolean(*v == o.as_boolean().unwrap())),
                 Value::List(v) => Ok(Value::Boolean(v.clone() == o.as_list().unwrap())),
@@ -184,7 +184,7 @@ impl Value {
                 }),
             },
             CalculateMark::NotEqual => match self {
-                Value::String(v) => Ok(Value::Boolean(v.to_string() != o.as_string().unwrap())),
+                Value::String(v) => Ok(Value::Boolean(*v != o.as_string().unwrap())),
                 Value::Number(v) => Ok(Value::Boolean(*v != o.as_number().unwrap())),
                 Value::Boolean(v) => Ok(Value::Boolean(*v != o.as_boolean().unwrap())),
                 Value::List(v) => Ok(Value::Boolean(v.clone() != o.as_list().unwrap())),
@@ -242,7 +242,7 @@ impl Value {
                 operator: "None".to_string(),
                 value_type: o.value_name(),
             }),
-        };
+        }
     }
 }
 
@@ -285,4 +285,3 @@ impl Element {
         result
     }
 }
-

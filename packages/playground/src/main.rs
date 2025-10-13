@@ -68,7 +68,7 @@ pub fn App() -> Element {
                     button {
                         class: "bg-emerald-500 hover:bg-emerald-700 text-white font-semibold text-sm ml-2 py-2 px-3 rounded",
                         onclick: move |_| { display_result.set(1); },
-                        "AST Tree"
+                        "AST"
                     }
                     button {
                         class: "bg-emerald-500 hover:bg-emerald-700 text-white font-semibold text-sm ml-2 py-2 px-3 rounded",

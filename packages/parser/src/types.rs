@@ -41,11 +41,7 @@ impl AstValue {
     }
 
     pub fn as_none(&self) -> bool {
-        if let Self::None = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::None)
     }
 
     pub fn as_string(&self) -> Option<String> {

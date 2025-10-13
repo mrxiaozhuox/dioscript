@@ -3,13 +3,12 @@ use std::collections::HashMap;
 use nom::{
     branch::alt,
     bytes::complete::{
-        escaped, escaped_transform, tag, tag_no_case, take, take_till, take_till1, take_while,
-        take_while1, take_while_m_n,
+        escaped_transform, tag, tag_no_case, take, take_till1, take_while, take_while1,
     },
     character::complete::{
         alpha1, alphanumeric1, char, digit1, multispace0, not_line_ending, space0, space1,
     },
-    combinator::{map, opt, peek, value},
+    combinator::{map, opt, value},
     error::context,
     multi::{fold_many0, many0, separated_list0, separated_list1},
     number::complete::double,
@@ -83,7 +82,6 @@ impl TypeParser {
                 value("\n", tag("n")),
                 value("\r", tag("r")),
                 value("\t", tag("t")),
-                // 处理任何其他转义字符，只保留字符本身
                 map(take(1u8), |c: &str| c),
             )),
         );
@@ -180,7 +178,7 @@ impl TypeParser {
             "value",
             alt((
                 map(TypeParser::number, AstValue::Number),
-                map(TypeParser::string, |s| AstValue::String(String::from(s))),
+                map(TypeParser::string, AstValue::String),
                 map(TypeParser::variable, AstValue::Variable),
             )),
         )(message)
@@ -192,7 +190,7 @@ impl TypeParser {
             alt((
                 map(TypeParser::number, AstValue::Number),
                 map(TypeParser::boolean, AstValue::Boolean),
-                map(TypeParser::string, |s| AstValue::String(String::from(s))),
+                map(TypeParser::string, AstValue::String),
                 map(TypeParser::list, AstValue::List),
                 map(TypeParser::dict, AstValue::Dict),
                 map(TypeParser::tuple, AstValue::Tuple),
@@ -388,7 +386,7 @@ impl FunctionParser {
                                 if v.len() > 1 {
                                     FunctionName::Namespace(v)
                                 } else {
-                                    FunctionName::Single(v.get(0).unwrap().to_string())
+                                    FunctionName::Single(v.first().unwrap().to_string())
                                 }
                             },
                         ),
@@ -445,7 +443,7 @@ impl FunctionParser {
                                     tag(","),
                                     delimited(space0, VariableParser::parse_var_name, space0),
                                 ),
-                                |v| ParamsType::List(v),
+                                ParamsType::List,
                             ),
                         )),
                         delimited(tag(")"), space0, tag("{")),
@@ -604,7 +602,7 @@ impl ElementParser {
                                                     CalculateParser::expr,
                                                     multispace0,
                                                 ),
-                                                |v| AttributeType::InlineExpr(v),
+                                                AttributeType::InlineExpr,
                                             ),
                                             map(
                                                 delimited(
@@ -632,7 +630,7 @@ impl ElementParser {
                                                 StatementParser::parse_if,
                                                 multispace0,
                                             ),
-                                            |v| AttributeType::Condition(v),
+                                            AttributeType::Condition,
                                         ),
                                         map(
                                             delimited(
@@ -640,7 +638,7 @@ impl ElementParser {
                                                 StatementParser::parse_for,
                                                 multispace0,
                                             ),
-                                            |v| AttributeType::Loop(v),
+                                            AttributeType::Loop,
                                         ),
                                         map(
                                             delimited(
@@ -648,7 +646,7 @@ impl ElementParser {
                                                 StatementParser::parse_while,
                                                 multispace0,
                                             ),
-                                            |v| AttributeType::Loop(v),
+                                            AttributeType::Loop,
                                         ),
                                     )),
                                 ))),
@@ -667,7 +665,7 @@ impl ElementParser {
                                     ),
                                     map(
                                         delimited(multispace0, CalculateParser::expr, multispace0),
-                                        |v| AttributeType::InlineExpr(v),
+                                        AttributeType::InlineExpr,
                                     ),
                                     map(
                                         delimited(multispace0, TypeParser::string, multispace0),
@@ -683,7 +681,7 @@ impl ElementParser {
                                             StatementParser::parse_if,
                                             multispace0,
                                         ),
-                                        |v| AttributeType::Condition(v),
+                                        AttributeType::Condition,
                                     ),
                                     map(
                                         delimited(
@@ -691,7 +689,7 @@ impl ElementParser {
                                             StatementParser::parse_for,
                                             multispace0,
                                         ),
-                                        |v| AttributeType::Loop(v),
+                                        AttributeType::Loop,
                                     ),
                                     map(
                                         delimited(
@@ -699,7 +697,7 @@ impl ElementParser {
                                             StatementParser::parse_while,
                                             multispace0,
                                         ),
-                                        |v| AttributeType::Loop(v),
+                                        AttributeType::Loop,
                                     ),
                                 ))),
                             ),
@@ -764,15 +762,15 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
         many0(delimited(
             multispace0,
             alt((
-                map(comment, |v| DioAstStatement::LineComment(v)),
-                map(VariableParser::parse, |v| DioAstStatement::VariableAss(v)),
+                map(comment, DioAstStatement::LineComment),
+                map(VariableParser::parse, DioAstStatement::VariableAss),
                 map(
                     delimited(tag("return "), CalculateParser::expr, tag(";")),
-                    |v| DioAstStatement::ReturnValue(v),
+                    DioAstStatement::ReturnValue,
                 ),
                 map(
                     terminated(FunctionParser::call, pair(space0, tag(";"))),
-                    |v| DioAstStatement::FunctionCall(v),
+                    DioAstStatement::FunctionCall,
                 ),
                 map(StatementParser::parse_if, |v| {
                     DioAstStatement::IfStatement(v)
@@ -786,7 +784,7 @@ pub(crate) fn parse_rsx(message: &str) -> IResult<&str, Vec<DioAstStatement>> {
                 map(FunctionParser::define, |v| {
                     DioAstStatement::FunctionDefine(v)
                 }),
-                map(ModuleParser::parse_use, |v| DioAstStatement::ModuleUse(v)),
+                map(ModuleParser::parse_use, DioAstStatement::ModuleUse),
             )),
             multispace0,
         )),

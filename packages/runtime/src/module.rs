@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-
-use crate::{types::{Value, FunctionType}, Runtime};
+use crate::{
+    types::{FunctionType, Value},
+    Runtime,
+};
 
 pub type RustyFunction = fn(&mut Runtime, Vec<Value>) -> Value;
 
@@ -11,7 +13,6 @@ pub enum ModuleItem {
     Variable(Value),
     SubModule(ModuleInfo),
 }
-
 
 #[derive(Clone)]
 pub struct ModuleInfo(pub HashMap<String, ModuleItem>);
@@ -30,7 +31,6 @@ impl ModuleGenerator {
         self.insert(k, ModuleItem::Function(FunctionType::Rusty((func, arg))))
     }
 
-
     pub fn insert_sub_module(&mut self, k: &str, v: ModuleGenerator) {
         self.insert(k, ModuleItem::SubModule(ModuleInfo(v.0)));
     }
@@ -38,5 +38,10 @@ impl ModuleGenerator {
     pub fn to_module_item(self) -> ModuleItem {
         ModuleItem::SubModule(ModuleInfo(self.0))
     }
+}
 
+impl Default for ModuleGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
 }

@@ -83,7 +83,7 @@ impl Runtime {
         let full_name = func.name.clone();
         if let Some(name) = full_name {
             // let root_scope = self.root_scope.clone();
-            let new_scope = self.set_var(
+            let new_scope = self.create_var(
                 &name,
                 Value::Function(types::FunctionType::DScript(func.clone())),
             )?;
@@ -136,7 +136,11 @@ impl Runtime {
                     let name = var.name.clone();
                     let value = var.expr.clone();
                     let value = self.execute_calculate(value)?;
-                    let _scope = self.set_var(&name, value)?;
+                    if var.new {
+                        let _scope = self.create_var(&name, value)?;
+                    } else {
+                        let _scope = self.set_var(&name, value)?;
+                    }
                 }
                 DioAstStatement::ReturnValue(r) => {
                     result = self.execute_calculate(r.clone())?;
@@ -188,7 +192,7 @@ impl Runtime {
                             let iter = self.to_value(iter)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
-                                    self.set_var(&var, i.clone())?;
+                                    self.create_var(&var, i.clone())?;
                                     let res = self.execute_scope(data.inner.clone())?;
                                     if !res.as_none() {
                                         result = res;
@@ -329,7 +333,7 @@ impl Runtime {
                 // Set the function parameters in the new scope
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
-                        self.set_var(v, Value::List(par))?;
+                        self.create_var(v, Value::List(par))?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {
@@ -340,7 +344,7 @@ impl Runtime {
                             });
                         }
                         for (i, v) in v.iter().enumerate() {
-                            self.set_var(v, par.get(i).unwrap().clone())?;
+                            self.create_var(v, par.get(i).unwrap().clone())?;
                         }
                     }
                 }
@@ -380,7 +384,7 @@ impl Runtime {
                 // Set the function parameters in the new scope
                 match &f.params {
                     dioscript_parser::ast::ParamsType::Variable(v) => {
-                        self.set_var(v, Value::List(par))?;
+                        self.create_var(v, Value::List(par))?;
                     }
                     dioscript_parser::ast::ParamsType::List(v) => {
                         if v.len() != par.len() {
@@ -391,7 +395,7 @@ impl Runtime {
                             });
                         }
                         for (i, v) in v.iter().enumerate() {
-                            self.set_var(v, par.get(i).unwrap().clone())?;
+                            self.create_var(v, par.get(i).unwrap().clone())?;
                         }
                     }
                 }
@@ -706,8 +710,34 @@ impl Runtime {
         })
     }
 
+    fn create_var(&mut self, name: &str, value: Value) -> Result<Uuid, RuntimeError> {
+        let id = if let Some(current_scope) = self.scopes.last() {
+            if let Some(uuid) = current_scope.data.get(name) {
+                let data = self.data.get_mut(uuid).unwrap();
+                match data {
+                    DataType::Variable(v) => {
+                        *v = value;
+                    }
+                    _ => (),
+                }
+                *uuid
+            } else {
+                let id = Uuid::new_v4();
+                self.data.insert(id, DataType::Variable(value));
+                if let Some(current_scope) = self.scopes.last_mut() {
+                    current_scope.data.insert(name.to_string(), id);
+                }
+                id
+            }
+        } else {
+            return Err(RuntimeError::ScopeNotFound);
+        };
+
+        Ok(id)
+    }
+
     fn set_var(&mut self, name: &str, value: Value) -> Result<Uuid, RuntimeError> {
-        let id = if let Ok((id, _)) = self.get_var(name) {
+        if let Ok((id, _)) = self.get_var(name) {
             let data = self.data.get_mut(&id).unwrap();
             #[allow(unreachable_patterns)]
             match data {
@@ -716,16 +746,12 @@ impl Runtime {
                 }
                 _ => (),
             }
-            id
+            Ok(id)
         } else {
-            let id = Uuid::new_v4();
-            let _ = self.data.insert(id, DataType::Variable(value));
-            if let Some(current_scope) = self.scopes.last_mut() {
-                current_scope.data.insert(name.to_string(), id);
-            }
-            id
-        };
-        Ok(id)
+            Err(RuntimeError::VariableNotFound {
+                name: name.to_string(),
+            })
+        }
     }
 
     #[allow(dead_code)]
@@ -893,7 +919,7 @@ impl Runtime {
                             let iter = self.to_value(iter)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
-                                    self.set_var(&var, i.clone())?;
+                                    self.create_var(&var, i.clone())?;
                                     let temp = self.execute_scope(v.inner.clone())?;
                                     if let Value::Tuple((k, v)) = &temp {
                                         if let Value::String(k) = *k.clone() {

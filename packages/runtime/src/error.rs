@@ -16,6 +16,9 @@ pub enum RuntimeError {
         value_type: String,
     },
 
+    #[error("scope validation error.")]
+    ScopeNotFound,
+
     #[error("cannot compare different data type: `{a}` and `{b}`.")]
     CompareDiffType { a: String, b: String },
 
