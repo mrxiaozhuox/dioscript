@@ -1,9 +1,11 @@
-use std::{fs::File, io::Write, path::PathBuf, time::Instant};
+use std::time::Instant;
 
 use clap::{Args, Parser, Subcommand};
 use colored::*;
+use playground::playground_main;
 
 mod builder;
+mod playground;
 
 #[derive(Parser)]
 #[command(name = "ds")]
@@ -54,7 +56,7 @@ pub fn main() {
     match &cli.command {
         Commands::Build(args) => {
             let timer = Instant::now();
-            let r = builder::build(&args);
+            let r = builder::build(args);
             let duration = timer.elapsed();
             match r {
                 Err(e) => {
@@ -87,75 +89,7 @@ pub fn main() {
             }
         }
         Commands::Playground(_args) => {
-            println!("\n{}", "Welcome to `Dioscript` playground!".blue().bold());
-            println!(
-                "{}",
-                "Use `.execute` command to execute input code.\n"
-                    .green()
-                    .bold()
-            );
-            let mut record = String::new();
-            let mut code_buffer: Vec<_> = Vec::new();
-            let mut readline = rustyline::DefaultEditor::new().expect("init stdin failed.");
-            let mut runtime = dioscript_runtime::Runtime::new();
-            loop {
-                let input = readline.readline(">> ").unwrap();
-                if input == ".execute" || input == "." {
-                    let code = code_buffer.join("\n");
-                    let ast = dioscript_parser::ast::DioscriptAst::from_string(&code);
-                    match ast {
-                        Ok(ast) => {
-                            let result = runtime.execute_ast(ast);
-                            match result {
-                                Ok(r) => {
-                                    if !r.as_none() {
-                                        println!("\n[ds] Result: {:#?}\n", r);
-                                    } else {
-                                        println!(
-                                            "\n[ds] 🚀 {}\n",
-                                            "execute successful!".green().bold()
-                                        );
-                                    }
-                                }
-                                Err(e) => {
-                                    println!(
-                                        "\n[ds] Runtime error: {}\n",
-                                        e.to_string().red().bold()
-                                    );
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("\n[ds] Parse failed: {}\n", e.to_string().red().bold());
-                        }
-                    }
-                    record = code;
-                    code_buffer = Vec::new();
-                } else if input == ".undo" || input == ".u" {
-                    if code_buffer.len() > 0 {
-                        println!("\nUndo code input: {}\n", code_buffer.last().unwrap());
-                        code_buffer.remove(code_buffer.len() - 1);
-                    }
-                } else if input == ".clear" || input == ".c" {
-                    code_buffer.clear();
-                    println!(
-                        "\n🚀 {}\n",
-                        "deleted all recorded code line.".yellow().bold()
-                    );
-                } else if input == ".trace" || input == ".t" {
-                    runtime.trace();
-                } else if input == ".save" || input == ".s" {
-                    let file = PathBuf::from("./playground.ds");
-                    let mut output = File::create(file).unwrap();
-                    write!(output, "{}", record).unwrap();
-                    println!("\n🔰 {}\n", "`playground.ds` file created.".cyan().bold());
-                } else if input == ".quit" || input == ".q" {
-                    println!("\n👋 {}\n", "Bye!".green().bold());
-                    break;
-                } else {
-                    code_buffer.push(input);
-                }
-            }
+            playground_main();
         }
     }
 }

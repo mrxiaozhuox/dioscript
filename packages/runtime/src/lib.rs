@@ -12,12 +12,14 @@ use dioscript_parser::{
     types::AstValue,
 };
 use module::{ModuleGenerator, ModuleItem};
+use names::RESERVED_KEYWORDS;
 use types::{Element, ElementContentType, FunctionType, Value};
 use uuid::Uuid;
 
 pub mod error;
+pub mod library;
 pub mod module;
-pub mod stdlib;
+pub mod names;
 pub mod types;
 
 pub struct Runtime {
@@ -48,17 +50,13 @@ impl Runtime {
     fn setup(&mut self) -> Result<(), RuntimeError> {
         // let scope = self.root_scope.clone();
 
-        let mut module_exporter = HashMap::new();
+        self.modules = library::built_in().0;
 
-        module_exporter.insert("std".to_string(), stdlib::std().to_module_item());
-
-        self.modules = module_exporter;
-
-        for path in stdlib::auto_use() {
-            let temp: Vec<String> = path.split("::").map(|v| v.to_string()).collect();
-            self.namespace_use
-                .insert(temp.last().unwrap().to_string(), temp);
-        }
+        // for path in library::auto_use() {
+        //     let temp: Vec<String> = path.split("::").map(|v| v.to_string()).collect();
+        //     self.namespace_use
+        //         .insert(temp.last().unwrap().to_string(), temp);
+        // }
 
         Ok(())
     }
@@ -74,6 +72,23 @@ impl Runtime {
     pub fn bind_module(&mut self, name: &str, module: ModuleGenerator) {
         self.modules
             .insert(name.to_string(), module.to_module_item());
+    }
+
+    // collect function define from statments
+    // only collect named function
+    pub fn collect_functions(
+        &mut self,
+        statements: &[DioAstStatement],
+    ) -> Result<(), RuntimeError> {
+        for statement in statements {
+            if let DioAstStatement::FunctionDefine(fd) = statement {
+                if fd.name.is_some() {
+                    self.add_script_function(fd.clone())?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn add_script_function(
@@ -117,9 +132,17 @@ impl Runtime {
     }
 
     fn execute_scope(&mut self, statements: Vec<DioAstStatement>) -> Result<Value, RuntimeError> {
+        // result: return value
+        // finish: interrupt status
         let mut result: Value = Value::None;
         let mut finish = false;
+
+        // enter a new scope
         self.enter_scope(false);
+
+        // collect current level functions.
+        self.collect_functions(&statements)?;
+
         for v in statements {
             if finish {
                 break;
@@ -131,8 +154,6 @@ impl Runtime {
                     self.namespace_use.insert(last.to_string(), u.clone());
                 }
                 DioAstStatement::VariableAss(var) => {
-                    // let name = var.0.clone();
-                    // let value = var.1.clone();
                     let name = var.name.clone();
                     let value = var.expr.clone();
                     let value = self.execute_calculate(value)?;
@@ -308,6 +329,7 @@ impl Runtime {
                     }),
                 }
             }
+            // TODO: Element
             _ => Ok(value),
         }
     }
@@ -364,7 +386,7 @@ impl Runtime {
                         provided: par.len() as i16,
                     });
                 }
-                Ok(f(self, par))
+                f(self, par)
             }
         }
     }
@@ -415,7 +437,7 @@ impl Runtime {
                         provided: par.len() as i16,
                     });
                 }
-                Ok(f(self, par))
+                f(self, par)
             }
         }
     }
@@ -584,48 +606,10 @@ impl Runtime {
                 dioscript_parser::parser::LinkExprPart::Field(field) => {
                     this = self.deref_value(this.clone())?;
                     match &this {
-                        Value::List(list) => {
-                            let index = field.parse::<usize>();
-                            if let Ok(index) = index {
-                                if list.len() > index {
-                                    this = list.get(index).unwrap().clone();
-                                } else {
-                                    return Err(RuntimeError::UnknownAttribute {
-                                        attr: field,
-                                        value: this.value_name(),
-                                    });
-                                }
-                            } else {
-                                return Err(RuntimeError::UnknownAttribute {
-                                    attr: field,
-                                    value: this.value_name(),
-                                });
-                            }
-                        }
-                        Value::Dict(dict) => {
-                            if dict.contains_key(&field) {
-                                this = dict.get(&field).unwrap().clone();
-                            } else {
-                                return Err(RuntimeError::UnknownAttribute {
-                                    attr: field,
-                                    value: this.value_name(),
-                                });
-                            }
-                        }
-                        Value::Tuple(tuple) => match field.as_str() {
-                            "0" => {
-                                this = *tuple.0.clone();
-                            }
-                            "1" => {
-                                this = *tuple.1.clone();
-                            }
-                            _ => {
-                                return Err(RuntimeError::UnknownAttribute {
-                                    attr: field,
-                                    value: this.value_name(),
-                                });
-                            }
-                        },
+                        // Element:
+                        //  name: element name [string]
+                        //  attributes: attribute list k:v [dict]
+                        //  content: content list [list]
                         Value::Element(element) => match field.as_str() {
                             "name" => {
                                 this = Value::String(element.name.clone());
@@ -662,38 +646,43 @@ impl Runtime {
                         }
                     }
                 }
-                dioscript_parser::parser::LinkExprPart::FunctionCall(call) => match &this {
-                    Value::String(content) => {
-                        let mut pararms = vec![Value::String(content.to_string())];
-                        for i in call.arguments {
-                            let v = self.execute_calculate(i)?;
-                            pararms.push(v);
-                        }
-                        let v = self.get_var("string")?.1;
-                        let v = self.deref_value(v)?;
-                        if let Value::Dict(v) = v {
-                            if let Some(Value::Function(f)) = v.get(&call.name.as_single()) {
-                                this = self.execute_function_by_ft(f.clone(), pararms)?;
+                dioscript_parser::parser::LinkExprPart::FunctionCall(call) => {
+                    let function_name = call.name;
+                    let mut params = vec![this.clone()];
+                    for i in call.arguments {
+                        let v = self.execute_calculate(i)?;
+                        params.push(v);
+                    }
+
+                    #[allow(warnings)]
+                    if let Some(m) = self.modules.get(&this.value_name()) {
+                        if let ModuleItem::SubModule(sub) = m {
+                            if let Some(v) = sub.0.get(&function_name.as_single()) {
+                                if let ModuleItem::Function(f) = v {
+                                    this = self.execute_function_by_ft(f.clone(), params)?;
+                                }
                             }
                         }
                     }
-                    Value::Number(_) => todo!(),
-                    Value::Boolean(_) => todo!(),
-                    Value::List(_) => todo!(),
-                    Value::Dict(_) => todo!(),
-                    Value::Tuple(_) => todo!(),
-                    Value::Element(_) => todo!(),
-                    Value::Function(_) => todo!(),
-                    _ => {
-                        unimplemented!()
-                    }
-                },
+                }
             }
         }
         self.deref_value(this)
     }
 
+    // get variable value:
     fn get_var(&self, name: &str) -> Result<(Uuid, Value), RuntimeError> {
+        // only for function:
+        for scope in self.scopes.iter().rev() {
+            if let Some(uuid) = scope.data.get(name) {
+                if let Some(DataType::Variable(value)) = self.data.get(uuid) {
+                    if matches!(value, Value::Function(_)) {
+                        return Ok((*uuid, value.clone()));
+                    }
+                }
+            }
+        }
+
         for scope in self.scopes.iter().rev() {
             if let Some(uuid) = scope.data.get(name) {
                 if let Some(data_type) = self.data.get(uuid) {
@@ -710,15 +699,19 @@ impl Runtime {
         })
     }
 
+    #[allow(irrefutable_let_patterns)]
     fn create_var(&mut self, name: &str, value: Value) -> Result<Uuid, RuntimeError> {
+        if RESERVED_KEYWORDS.contains(&name) {
+            return Err(RuntimeError::UsingReservedKeyword {
+                keyword: name.to_string(),
+            });
+        }
+
         let id = if let Some(current_scope) = self.scopes.last() {
             if let Some(uuid) = current_scope.data.get(name) {
                 let data = self.data.get_mut(uuid).unwrap();
-                match data {
-                    DataType::Variable(v) => {
-                        *v = value;
-                    }
-                    _ => (),
+                if let DataType::Variable(v) = data {
+                    *v = value;
                 }
                 *uuid
             } else {
@@ -736,15 +729,13 @@ impl Runtime {
         Ok(id)
     }
 
+    #[allow(irrefutable_let_patterns)]
     fn set_var(&mut self, name: &str, value: Value) -> Result<Uuid, RuntimeError> {
         if let Ok((id, _)) = self.get_var(name) {
             let data = self.data.get_mut(&id).unwrap();
             #[allow(unreachable_patterns)]
-            match data {
-                DataType::Variable(v) => {
-                    *v = value;
-                }
-                _ => (),
+            if let DataType::Variable(v) = data {
+                *v = value;
             }
             Ok(id)
         } else {
@@ -808,7 +799,7 @@ impl Runtime {
                         Ok(value.clone())
                     } else {
                         Err(RuntimeError::IndexNotFound {
-                            index: index.value_name(),
+                            index: key.to_string(),
                             value: value.value_name(),
                         })
                     }
@@ -942,12 +933,15 @@ impl Runtime {
                 }
                 AstElementContentType::InlineExpr(v) => {
                     let result = self.execute_calculate(v)?;
-                    if let Value::String(s) = &result {
-                        content.push(ElementContentType::Content(s.clone()));
-                    }
-                    if let Value::Number(s) = result {
-                        content.push(ElementContentType::Content(format!("{s}")));
-                    }
+                    let content_type = match &result {
+                        Value::None => ElementContentType::Content("none".to_string()),
+                        Value::String(s) => ElementContentType::Content(s.clone()),
+                        Value::Number(s) => ElementContentType::Content(format!("{s}")),
+                        Value::Boolean(s) => ElementContentType::Content(s.to_string()),
+                        Value::Element(s) => ElementContentType::Children(s.clone()),
+                        _ => ElementContentType::Content(result.to_string()),
+                    };
+                    content.push(content_type);
                 }
             }
         }
@@ -994,9 +988,9 @@ pub enum DataType {
 impl DataType {
     pub fn as_variable(&self) -> Option<Value> {
         #[allow(unreachable_patterns)]
-        match self {
-            Self::Variable(r) => return Some(r.clone()),
-            _ => (),
+        #[allow(irrefutable_let_patterns)]
+        if let Self::Variable(r) = self {
+            return Some(r.clone());
         }
         None
     }

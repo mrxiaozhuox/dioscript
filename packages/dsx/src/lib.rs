@@ -22,8 +22,17 @@ pub fn View(code: String) -> Element {
         }
         Err(e) => {
             let message = e.to_string();
+            let message = message.split_once(": ").map(|v| v.1).unwrap_or(&message);
+            let errors = message.split("\n").map(|v| {
+                rsx! {
+                    p { "{v}" }
+                }
+            });
             rsx! {
-                div { class: "font-semibold", "Error: {message}" }
+                div {
+                    class: "font-semibold text-red-700 whitespace-pre font-mono",
+                    { errors }
+                }
             }
         }
     }
@@ -45,8 +54,16 @@ pub fn AstView(code: String) -> Element {
         }
         Err(e) => {
             let message = e.to_string();
+            let errors = message.split("\n").map(|v| {
+                rsx! {
+                    p { "{v}" }
+                }
+            });
             rsx! {
-                div { class: "font-semibold", "Error: {message}" }
+                div {
+                    class: "font-semibold text-red-700 whitespace-pre font-mono",
+                    { errors }
+                }
             }
         }
     }
@@ -70,8 +87,17 @@ pub fn NamespaceView(code: String) -> Element {
         }
         Err(e) => {
             let message = e.to_string();
+            let message = message.split_once(": ").map(|v| v.1).unwrap_or(&message);
+            let errors = message.split("\n").map(|v| {
+                rsx! {
+                    p { "{v}" }
+                }
+            });
             rsx! {
-                div { class: "font-semibold", "Error: {message}" }
+                div {
+                    class: "font-semibold text-red-700 whitespace-pre font-mono",
+                    { errors }
+                }
             }
         }
     }

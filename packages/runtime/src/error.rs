@@ -60,4 +60,10 @@ pub enum RuntimeError {
 
     #[error("cannot find namespace `{part}` in `{module}` module.")]
     ModulePartNotFound { part: String, module: String },
+
+    #[error("dynamic parse failed: `{err}`.")]
+    DynamicParseFailed { err: String },
+
+    #[error("keyword `{keyword}` cannot become a function & variable name.")]
+    UsingReservedKeyword { keyword: String },
 }

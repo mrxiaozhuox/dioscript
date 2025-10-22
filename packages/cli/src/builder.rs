@@ -14,7 +14,7 @@ pub fn build(args: &BuildArgs) -> anyhow::Result<String> {
     let out_dir = &args.out_dir;
     let template = &args.template;
 
-    let build_target = BuildTarget::from_str(&target);
+    let build_target = BuildTarget::from_str(target);
     let file_path = PathBuf::from(file_name);
     let file_content = read_to_string(&file_path)?;
     let file_stem = file_path.file_stem().unwrap().to_str().unwrap();
@@ -24,8 +24,7 @@ pub fn build(args: &BuildArgs) -> anyhow::Result<String> {
         if !file.is_file() {
             "<dioscript />".to_string()
         } else {
-            let string = read_to_string(file)?;
-            string
+            read_to_string(file)?
         }
     } else {
         "<dioscript />".to_string()
@@ -42,14 +41,12 @@ pub fn build(args: &BuildArgs) -> anyhow::Result<String> {
                     create_dir_all(out_dir)?;
                 }
                 std::fs::write(format!("{}/{}.html", out_dir, file_stem), html)?;
-                return Ok(format!("{}/{}.html", out_dir, file_stem));
+                Ok(format!("{}/{}.html", out_dir, file_stem))
             } else {
-                return Err(anyhow!("result data type is not Element"));
+                Err(anyhow!("result data type is not Element"))
             }
         }
-        BuildTarget::Unknown => {
-            return Err(anyhow!("dioscript not support `{target}` builder."));
-        }
+        BuildTarget::Unknown => Err(anyhow!("dioscript not support `{target}` builder.")),
     }
 }
 

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use nom::{combinator::all_consuming, Finish};
 
 use crate::{
-    error::ParseError,
+    error::{simplify_error, ParseError},
     parser::{parse_rsx, CalcExpr},
     types::AstValue,
 };
@@ -16,7 +16,6 @@ pub struct DioscriptAst {
 impl DioscriptAst {
     pub fn from_string(message: &str) -> Result<Self, ParseError> {
         let v = all_consuming(parse_rsx)(message).finish();
-        println!("{:?}", v);
         if let Ok((text, ast)) = v {
             if text.trim().is_empty() {
                 Ok(DioscriptAst { stats: ast })
@@ -28,7 +27,8 @@ impl DioscriptAst {
             }
         } else {
             let err = v.err().unwrap();
-            let err = nom::error::convert_error(message, err);
+
+            let err = simplify_error(message, err);
             Err(ParseError::ParseFailure { text: err })
         }
     }

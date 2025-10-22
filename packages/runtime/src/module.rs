@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
 use crate::{
+    error::RuntimeError,
     types::{FunctionType, Value},
     Runtime,
 };
 
-pub type RustyFunction = fn(&mut Runtime, Vec<Value>) -> Value;
+pub type RustyFunction = fn(&mut Runtime, Vec<Value>) -> Result<Value, RuntimeError>;
 
 #[derive(Clone)]
 pub enum ModuleItem {
