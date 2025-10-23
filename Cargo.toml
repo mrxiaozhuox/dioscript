@@ -1,11 +1,5 @@
 [workspace]
-members = [
-  "packages/parser",
-  "packages/runtime",
-  "packages/cli",
-  "packages/dsx",
-  "packages/playground"
-]
+members = ["packages/parser", "packages/runtime", "packages/cli"]
 resolver = "2"
 
 [profile]

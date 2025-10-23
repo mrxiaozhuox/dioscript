@@ -2,13 +2,13 @@
     <h1>DioScript</h1>
 </div>
 
-> Dioscript is a script language use for generate web elements.
+> Dioscript is a script language use for generate web elements and embed into rust program.
 
 ```dioscript
-username = "YuKun Liu";
-login = false;
+let username = "YuKun Liu";
+let login = false;
 
-display_navbar = true;
+let display_navbar = true;
 if display_navbar == false {
     return "unavailable navbar.";
 }

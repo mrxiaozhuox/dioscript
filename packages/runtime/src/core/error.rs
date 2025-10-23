@@ -73,6 +73,9 @@ pub enum RuntimeError {
     #[error("trying to access an unknwon pointer: `{pointer}`")]
     UnknownPointer { pointer: String },
 
-    #[error("Circular reference detected.")]
+    #[error("circular reference detected.")]
     CircularReference,
+
+    #[error("variable `{name}` already defined, cannot define again.")]
+    VariableAlreadyDefined { name: String },
 }

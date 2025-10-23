@@ -1,0 +1,18 @@
+// getSequence will generate a anonymous function:
+fn getSequence () {
+  let i = 0;
+  return fn () {
+    i = i + 1;
+    return i;
+  };
+}
+
+// get an add function from `getSequence`
+let add = getSequence();
+
+// 1
+print(add());
+// 2
+print(add());
+// 3
+print(add());

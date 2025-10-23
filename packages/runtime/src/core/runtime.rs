@@ -820,26 +820,16 @@ impl Runtime {
             });
         }
 
-        let id = if let Some(current_scope) = self.scopes.last() {
-            if let Some(uuid) = current_scope.data.get(name) {
-                let data = self.data.get_mut(uuid).unwrap();
-                if let DataType::Variable(v) = data {
-                    *v = value;
-                }
-                *uuid
-            } else {
-                let id = Uuid::new_v4();
-                self.data.insert(id, DataType::Variable(value));
-                if let Some(current_scope) = self.scopes.last_mut() {
-                    current_scope.data.insert(name.to_string(), id);
-                }
-                id
-            }
-        } else {
-            return Err(RuntimeError::ScopeNotFound);
-        };
+        let current_scope = self.scopes.last_mut().ok_or(RuntimeError::ScopeNotFound)?;
 
-        Ok(id)
+        if current_scope.data.contains_key(name) {
+            Err(RuntimeError::VariableAlreadyDefined { name: name.into() })
+        } else {
+            let id = Uuid::new_v4();
+            self.data.insert(id, DataType::Variable(value));
+            current_scope.data.insert(name.to_string(), id);
+            Ok(id)
+        }
     }
 
     fn follow_ref<'a>(&'a self, mut id: &'a Uuid) -> Result<&'a Uuid, RuntimeError> {
