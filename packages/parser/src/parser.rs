@@ -8,7 +8,7 @@ use nom::{
     character::complete::{
         alpha1, alphanumeric1, char, digit1, multispace0, not_line_ending, space0, space1,
     },
-    combinator::{cut, map, opt, success, value},
+    combinator::{cut, map, opt, value},
     error::{context, VerboseError},
     multi::{fold_many0, many0, separated_list0, separated_list1},
     number::complete::double,
@@ -19,7 +19,7 @@ use nom::{
 use crate::{
     ast::{
         ConditionalStatement, DioAstStatement, FunctionCall, FunctionDefine, FunctionName,
-        LoopStatement, ParamsType, UseStatement, VariableDefine,
+        LoopStatement, UseStatement, VariableDefine,
     },
     element::{AstElement, AstElementContentType},
     types::AstValue,
@@ -124,6 +124,16 @@ impl TypeParser {
         )(message)
     }
 
+    pub fn reference(message: &str) -> ParserResult<String> {
+        context(
+            "reference",
+            map(
+                preceded(tag("&"), cut(VariableParser::parse_var_name)),
+                |v| v.to_string(),
+            ),
+        )(message)
+    }
+
     fn variable_index(message: &str) -> ParserResult<(String, Box<CalcExpr>)> {
         context(
             "variable index",
@@ -186,6 +196,7 @@ impl TypeParser {
                 map(TypeParser::list, AstValue::List),
                 map(TypeParser::dict, AstValue::Dict),
                 map(TypeParser::tuple, AstValue::Tuple),
+                map(TypeParser::reference, AstValue::Reference),
                 map(ElementParser::parse, AstValue::Element),
                 map(FunctionParser::call, AstValue::FunctionCaller),
                 map(FunctionParser::define, AstValue::FunctionDefine),
@@ -417,6 +428,19 @@ impl FunctionParser {
         )(message)
     }
 
+    fn parse_param_list(i: &str) -> ParserResult<(Vec<String>, Option<String>)> {
+        let ident = |input| delimited(space0, VariableParser::parse_var_name, space0)(input);
+
+        let (i, fixed) = separated_list0(delimited(space0, char(','), space0), ident)(i)?;
+
+        let (i, variadic) = opt(preceded(
+            delimited(space0, opt(char(',')), space0),
+            preceded(char('*'), cut(ident)),
+        ))(i)?;
+
+        Ok((i, (fixed, variadic)))
+    }
+
     fn define(message: &str) -> ParserResult<FunctionDefine> {
         context(
             "function define",
@@ -426,26 +450,15 @@ impl FunctionParser {
                     opt(terminated(VariableParser::parse_var_name, space0)),
                     delimited(
                         tag("("),
-                        cut(alt((
-                            map(
-                                preceded(tag("@"), cut(VariableParser::parse_var_name)),
-                                ParamsType::Variable,
-                            ),
-                            map(
-                                separated_list0(
-                                    tag(","),
-                                    delimited(space0, VariableParser::parse_var_name, space0),
-                                ),
-                                ParamsType::List,
-                            ),
-                        ))),
+                        cut(Self::parse_param_list),
                         delimited(tag(")"), cut(space0), tag("{")),
                     ),
                     delimited(multispace0, parse_rsx, pair(multispace0, cut(tag("}")))),
                 )),
-                |(_, name, params, inner)| FunctionDefine {
+                |(_, name, (params, variadic_param), inner)| FunctionDefine {
                     name,
                     params,
+                    variadic_param,
                     inner,
                 },
             ),
@@ -489,7 +502,11 @@ impl StatementParser {
                 tuple((
                     pair(tag("for"), cut(space1)),
                     pair(cut(TypeParser::variable), pair(space1, tag("in"))),
-                    delimited(space1, cut(TypeParser::parse), pair(space0, cut(tag("{")))),
+                    delimited(
+                        space1,
+                        cut(CalculateParser::expr),
+                        pair(space0, cut(tag("{"))),
+                    ),
                     delimited(multispace0, parse_rsx, pair(multispace0, cut(tag("}")))),
                 )),
                 |(_, (var_name, _), iter, inner)| LoopStatement {
@@ -567,7 +584,7 @@ impl ElementParser {
                 pair(
                     terminated(ElementParser::parse_element_name, multispace0),
                     delimited(
-                        tag("{"),
+                        delimited(multispace0, tag("{"), multispace0),
                         map(
                             pair(
                                 many0(alt((
@@ -608,7 +625,7 @@ impl ElementParser {
                                                 |v| AttributeType::Content(v.to_string()),
                                             ),
                                         )),
-                                        tag(","),
+                                        delimited(multispace0, tag(","), multispace0),
                                     ),
                                     alt((
                                         map(
@@ -781,6 +798,10 @@ pub(crate) fn parse_rsx(message: &str) -> ParserResult<Vec<DioAstStatement>> {
                     DioAstStatement::FunctionDefine(v)
                 }),
                 map(ModuleParser::parse_use, DioAstStatement::ModuleUse),
+                map(
+                    terminated(CalculateParser::expr, pair(space0, tag(";"))),
+                    DioAstStatement::CalcExpr,
+                ),
             )),
             multispace0,
         )),

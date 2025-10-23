@@ -1,6 +1,6 @@
 use colored::Colorize;
 use dioscript_parser::ast::DioscriptAst;
-use dioscript_runtime::{types::Value, Runtime};
+use dioscript_runtime::{Executor, OutputHandler, Value};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::{
     fs::{File, OpenOptions},
@@ -9,44 +9,105 @@ use std::{
     time::Instant,
 };
 
+use crate::print_value_result;
+
+pub struct PlaygroundOutputHandler;
+
+impl OutputHandler for PlaygroundOutputHandler {
+    fn print(&mut self, content: Value) {
+        print_value_result(&content);
+    }
+}
+
 pub fn playground_main() {
-    // inital print
+    // Initial print
     print_welcome_message();
 
-    // inital status
-    let mut code_buffer: Vec<String> = Vec::new();
-    let mut runtime = Runtime::new();
+    // Initial state
+    let mut runtime = Executor::init();
+
+    runtime.with_output_handler(Box::new(PlaygroundOutputHandler));
+
     let mut editor = setup_editor();
+    let mut multiline_mode = false;
+    let mut current_input: Vec<String> = Vec::new();
+    let mut code_buffer: Vec<String> = Vec::new();
 
     loop {
-        // dynamic prompt
-        let prompt = if code_buffer.is_empty() { ">> " } else { ".. " };
+        // Dynamic prompt, similar to Python's >>> and ...
+        let prompt = if multiline_mode { "... " } else { ">>> " };
 
-        // read input
+        // Read input
         match editor.readline(prompt) {
             Ok(input) => {
-                editor.add_history_entry(&input).ok();
+                let trimmed_input = input.trim();
 
-                // check its
-                if input.starts_with('.') {
-                    if !process_command(&input, &mut code_buffer, &mut runtime, &mut editor) {
+                // Handle special commands
+                if trimmed_input.starts_with('.') {
+                    if !process_command(trimmed_input, &mut code_buffer, &mut runtime, &mut editor)
+                    {
                         break;
                     }
+                    multiline_mode = false;
+                    current_input.clear();
+                    continue;
+                }
+
+                editor.add_history_entry(&input).ok();
+
+                // Handle multiline input
+                if multiline_mode {
+                    // Empty line ends multiline input
+                    if trimmed_input.is_empty() {
+                        multiline_mode = false;
+
+                        // Add current input to code buffer before execution
+                        for line in &current_input {
+                            code_buffer.push(line.clone());
+                        }
+
+                        execute_code(&current_input, &mut runtime);
+                        current_input.clear();
+                    } else {
+                        current_input.push(input);
+                    }
                 } else {
-                    code_buffer.push(input);
+                    // Check if need to enter multiline mode
+                    if trimmed_input.ends_with(':') || trimmed_input.ends_with('{') {
+                        multiline_mode = true;
+                        current_input.push(input);
+                    } else {
+                        // Single line mode, execute immediately
+                        current_input.push(input.clone());
+
+                        if execute_code(&current_input, &mut runtime) {
+                            // Add to code buffer after execution
+                            code_buffer.push(input);
+                        }
+
+                        current_input.clear();
+                    }
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                // Ctrl-C handle
-                if let Err(ReadlineError::Interrupted) =
-                    editor.readline(&format!("{}", "[ds] Press Ctrl-C Again to exit.".yellow()))
-                {
-                    println!("\n👋 {}\n", "Bye!".green().bold());
-                    break;
+                // Ctrl-C handling
+                if multiline_mode {
+                    // In multiline mode, Ctrl-C cancels current input
+                    println!("\n{}", "[ds] Multiline input cancelled.".yellow());
+                    multiline_mode = false;
+                    current_input.clear();
+                } else {
+                    // In single line mode, Ctrl-C prompts to press again to exit
+                    if let Err(ReadlineError::Interrupted) =
+                        editor.readline(&format!("{}", "[ds] Press Ctrl-C Again to exit.".yellow()))
+                    {
+                        println!("\n👋 {}\n", "Bye!".green().bold());
+                        break;
+                    }
                 }
             }
             Err(ReadlineError::Eof) => {
-                // Ctrl-D 处理
+                // Ctrl-D handling
                 println!("\n👋 {}\n", "Bye!".green().bold());
                 break;
             }
@@ -57,28 +118,26 @@ pub fn playground_main() {
         }
     }
 
-    // save history
+    // Save history
     save_history(&mut editor);
 }
 
-// handle command
-// when return `false`, app should exit
+// Process commands
+// When returning `false`, the application should exit
 fn process_command(
     input: &str,
     code_buffer: &mut Vec<String>,
-    runtime: &mut Runtime,
+    runtime: &mut Executor,
     editor: &mut DefaultEditor,
 ) -> bool {
     let parts: Vec<&str> = input.split_whitespace().collect();
     let cmd = parts[0];
 
     match cmd {
-        ".run" | ".r" => execute_code(code_buffer, runtime),
-        ".undo" | ".u" => undo_last_line(code_buffer),
+        ".debug" => debug(runtime, parts.get(1)),
         ".clear" | ".c" => clear_buffer(code_buffer),
-        ".trace" | ".t" => trace_runtime(runtime),
         ".save" | ".s" => save_code(code_buffer, parts.get(1)),
-        ".load" | ".l" => load_code(code_buffer, parts.get(1), editor),
+        ".load" | ".l" => load_code(code_buffer, parts.get(1), runtime, editor),
         ".show" | ".sh" => show_buffer(code_buffer),
         ".edit" | ".e" => edit_line(code_buffer, parts.get(1), editor),
         ".reset" | ".rs" => reset_environment(code_buffer, runtime, editor),
@@ -86,28 +145,28 @@ fn process_command(
         ".quit" | ".q" => return confirm_quit(code_buffer, editor),
         _ => {
             println!("\n{} Unknown Command: {}\n", "[ds]".red(), cmd);
-            println!("Use {} to find available commands\n", ":help".green());
+            println!("Use {} to find available commands\n", ".help".green());
         }
     }
 
-    true // keep work
+    true // Continue working
 }
 
-/// welcome message
+/// Welcome message
 fn print_welcome_message() {
-    println!("\n{}", "Dioscript Playground".blue().bold());
+    println!("\n{}", "Dioscript Interactive Shell".blue().bold());
     println!(
         "{}",
-        "Input code and use :execute or :r to exwecute".green()
+        "Type code to execute immediately, or end with ':' for multi-line input".green()
     );
-    println!("{}\n", "Input :help to find all commands".green());
+    println!("{}\n", "Type .help to find all commands".green());
 }
 
-// setup readline editor
+// Setup readline editor
 fn setup_editor() -> DefaultEditor {
-    let mut editor = DefaultEditor::new().expect("Cannot inital terminal editor");
+    let mut editor = DefaultEditor::new().expect("Cannot initialize terminal editor");
 
-    // load history
+    // Load history
     if let Some(history_path) = get_history_path() {
         let _ = editor.load_history(&history_path);
     }
@@ -115,7 +174,7 @@ fn setup_editor() -> DefaultEditor {
     editor
 }
 
-/// get history path
+/// Get history path
 fn get_history_path() -> Option<String> {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -123,7 +182,7 @@ fn get_history_path() -> Option<String> {
         .map(|home| format!("{}/.dioscript_history", home))
 }
 
-/// save history
+/// Save history
 fn save_history(editor: &mut DefaultEditor) {
     if let Some(history_path) = get_history_path() {
         if let Err(err) = editor.save_history(&history_path) {
@@ -132,101 +191,61 @@ fn save_history(editor: &mut DefaultEditor) {
     }
 }
 
-/// execute
-fn execute_code(code_buffer: &[String], runtime: &mut Runtime) {
-    if code_buffer.is_empty() {
-        println!("\n{} No code to execute\n", "[ds]".yellow());
-        return;
+/// Execute code
+fn execute_code(code_input: &[String], runtime: &mut Executor) -> bool {
+    if code_input.is_empty() {
+        return false;
     }
 
-    let code = code_buffer.join("\n");
+    let code = code_input.join("\n");
 
-    // parser
+    // Parse
     match DioscriptAst::from_string(&code) {
         Ok(ast) => {
-            // execute and start runtime
+            // Execute and start runtime
             let start_time = Instant::now();
-            match runtime.execute_ast(ast) {
+            match runtime.execute(ast) {
                 Ok(result) => {
                     let elapsed = start_time.elapsed();
 
-                    // result
+                    // Result - similar to Python's direct expression result display
                     if !result.as_none() {
-                        println!("\n{} Result:", "[ds]".green());
                         print_value_result(&result);
-                    } else {
-                        println!("\n{} {}", "[ds]".green(), "Successful!".green().bold());
                     }
 
-                    println!("{}: {:.2?}\n", "[ds] Execute Timer".green(), elapsed);
+                    // Only show timing for multiline or complex executions
+                    if code_input.len() > 1 {
+                        println!("{}: {:.2?}", "[ds] Execute Time".bright_black(), elapsed);
+                    }
+                    true
                 }
                 Err(e) => {
-                    println!("\n{} {}\n", "[ds] Runtime Error:".red().bold(), e);
+                    println!("{} {}", "[ds] Error:".red().bold(), e);
+                    false
                 }
             }
         }
         Err(e) => {
-            println!("\n{} {}\n", "[ds] Parser Error:".red().bold(), e);
+            println!("{} {}", "[ds] Syntax Error:".red().bold(), e);
+            false
         }
     }
 }
 
-/// make value pretty
-fn print_value_result(value: &Value) {
-    match value {
-        Value::String(s) => println!("{:?}", s),
-        Value::Number(n) => println!("{}", n),
-        Value::Boolean(b) => println!("{}", b),
-        Value::List(items) => {
-            println!("[");
-            for item in items {
-                print!("  ");
-                print_value_result(item);
-            }
-            println!("]");
-        }
-        Value::Dict(map) => {
-            println!("{{");
-            for (k, v) in map {
-                print!("  {}: ", k);
-                print_value_result(v);
-            }
-            println!("}}");
-        }
-        _ => println!("{:#?}", value),
-    }
-}
-
-/// Undo last line
-fn undo_last_line(code_buffer: &mut Vec<String>) {
-    if let Some(line) = code_buffer.pop() {
-        println!("\n{} Undo: {}\n", "[ds]".yellow(), line);
-    } else {
-        println!("\n{} Not code to undo\n", "[ds]".yellow());
-    }
-}
-
-/// clean buffer
+/// Clear buffer
 fn clear_buffer(code_buffer: &mut Vec<String>) {
     if !code_buffer.is_empty() {
         code_buffer.clear();
-        println!("\n{} The code buffer has been cleared.\n", "[ds]".green());
+        println!("{} Buffer cleared", "[ds]".green());
     } else {
-        println!("\n{} The code buffer is already empty.\n", "[ds]".yellow());
+        println!("{} Buffer is already empty", "[ds]".yellow());
     }
 }
 
-/// runtime trace
-fn trace_runtime(runtime: &mut Runtime) {
-    println!("\n{} Runtime Trace:", "[ds]".cyan());
-    runtime.trace();
-    println!();
-}
-
-/// save code
+/// Save code
 fn save_code(code_buffer: &[String], path_arg: Option<&&str>) {
     if code_buffer.is_empty() {
-        println!("\n{} CodeBuffer is empty\n", "[ds]".yellow());
+        println!("{} Buffer is empty", "[ds]".yellow());
         return;
     }
 
@@ -239,39 +258,43 @@ fn save_code(code_buffer: &[String], path_arg: Option<&&str>) {
         Ok(mut file) => match file.write_all(code.as_bytes()) {
             Ok(_) => {
                 println!(
-                    "\n{} {} {}\n",
+                    "{} {} {}",
                     "[ds]".green(),
-                    "Code save to:".green(),
+                    "Code saved to:".green(),
                     path.display()
                 );
             }
             Err(e) => {
-                println!("\n{} {}\n", "[ds] CodeBuffer save failed: ".red(), e);
+                println!("{} {}", "[ds] Save failed: ".red(), e);
             }
         },
         Err(e) => {
-            println!("\n{} {}\n", "[ds] Create file failed: ".red(), e);
+            println!("{} {}", "[ds] Create file failed: ".red(), e);
         }
     }
 }
 
-/// load code
-fn load_code(code_buffer: &mut Vec<String>, path_arg: Option<&&str>, editor: &mut DefaultEditor) {
+/// Load code
+fn load_code(
+    code_buffer: &mut Vec<String>,
+    path_arg: Option<&&str>,
+    runtime: &mut Executor,
+    editor: &mut DefaultEditor,
+) {
     let path = path_arg
         .map(|&p| PathBuf::from(p))
         .unwrap_or_else(|| PathBuf::from("./playground.ds"));
 
-    // code buffer is not empty
+    // Code buffer is not empty
     if !code_buffer.is_empty() {
         println!(
-            "\n{}",
-            "[ds] The current buffer is not empty, loading will overwrite the existing code."
-                .yellow()
+            "{}",
+            "[ds] Buffer is not empty, loading will overwrite existing code.".yellow()
         );
-        match editor.readline("Sure? (y/N) ") {
+        match editor.readline("Continue? (y/N) ") {
             Ok(input) if input.trim().to_lowercase() == "y" => {}
             _ => {
-                println!("\n{} Canceled\n", "[ds]".yellow());
+                println!("{} Canceled", "[ds]".yellow());
                 return;
             }
         }
@@ -285,55 +308,55 @@ fn load_code(code_buffer: &mut Vec<String>, path_arg: Option<&&str>, editor: &mu
                     code_buffer.clear();
                     *code_buffer = content.lines().map(String::from).collect();
                     println!(
-                        "\n{} {} {} ({} line)\n",
+                        "{} {} {} ({} lines)",
                         "[ds]".green(),
                         "Loaded from:".green(),
                         path.display(),
                         code_buffer.len()
                     );
+
+                    let ok = execute_code(code_buffer, runtime);
+                    if ok {
+                        println!("{}", "[ds] Code executed.".bright_black());
+                    }
                 }
                 Err(e) => {
-                    println!("\n{} Read file failed: {}\n", "[ds]".red(), e);
+                    println!("{} Read file failed: {}", "[ds]".red(), e);
                 }
             }
         }
         Err(e) => {
-            println!("\n{} Open  file failed: {}\n", "[ds]".red(), e);
+            println!("{} Open file failed: {}", "[ds]".red(), e);
         }
     }
 }
 
+/// Show current buffer contents
 fn show_buffer(code_buffer: &[String]) {
     if code_buffer.is_empty() {
-        println!("\n{}\n", "[ds] CodeBuffer is empty".yellow());
+        println!("{} Buffer is empty", "[ds]".yellow());
         return;
     }
 
-    println!(
-        "\n{} {}{}",
-        "[ds]".cyan().bold(),
-        "#".yellow().italic(),
-        "CodeBuffer".green().bold(),
-    );
-    println!();
+    println!("{} {}", "[ds]".cyan(), "Current Buffer:".green().bold());
 
     for (i, line) in code_buffer.iter().enumerate() {
         println!("{:4}: {}", i + 1, line);
     }
 
     println!(
-        "\n{} Total {} {} lines {}",
-        "[ds]".cyan().bold(),
+        "{} {} {} {}",
+        "[ds]".cyan(),
         "(".bright_black(),
         code_buffer.len().to_string().yellow(),
-        ")".bright_black()
+        "lines )".bright_black()
     );
-    println!();
 }
 
+/// Edit a specific line
 fn edit_line(code_buffer: &mut [String], line_arg: Option<&&str>, editor: &mut DefaultEditor) {
     if code_buffer.is_empty() {
-        println!("\n{} CodeBuffer is empty\n", "[ds]".yellow());
+        println!("{} Buffer is empty", "[ds]".yellow());
         return;
     }
 
@@ -341,62 +364,75 @@ fn edit_line(code_buffer: &mut [String], line_arg: Option<&&str>, editor: &mut D
         Some(num_str) => match num_str.parse::<usize>() {
             Ok(num) if num > 0 && num <= code_buffer.len() => num,
             _ => {
-                println!("\n{} Invalid line number\n", "[ds]".red());
+                println!("{} Invalid line number", "[ds]".red());
                 return;
             }
         },
         None => {
-            println!("\n{} Specify line number (.edit <line>)\n", "[ds]".yellow());
+            println!("{} Specify line number (.edit <line>)", "[ds]".yellow());
             return;
         }
     };
 
     let idx = line_num - 1;
-    println!("Edit line {} : {}", line_num, code_buffer[idx]);
+    println!("Line {} : {}", line_num, code_buffer[idx]);
 
-    match editor.readline("edit>> ") {
+    match editor.readline("edit>>> ") {
         Ok(new_line) => {
             code_buffer[idx] = new_line;
-            println!("\nLine {} updated\n", "[ds]".green());
+            println!("{} Line updated", "[ds]".green());
         }
         Err(_) => {
-            println!("\n{} Canceled\n", "[ds]".yellow());
+            println!("{} Canceled", "[ds]".yellow());
         }
     }
 }
 
-// reset
+fn debug(runtime: &mut Executor, info: Option<&&str>) {
+    match info.copied() {
+        Some("data") => {
+            println!("{:#?}", runtime.debug_data_info());
+        }
+        None | Some("scopes") => {
+            println!("{:#?}", runtime.debug_scopes_info());
+        }
+        _ => {}
+    }
+}
+
+/// Reset environment
 fn reset_environment(
     code_buffer: &mut Vec<String>,
-    runtime: &mut Runtime,
+    runtime: &mut Executor,
     editor: &mut DefaultEditor,
 ) {
     if !code_buffer.is_empty() {
         println!(
-            "\n{} This will clear the CodeBuffer and reset the runtime.",
-            "[ds]".yellow()
+            "{}",
+            "[ds] This will clear the buffer and reset the runtime.".yellow()
         );
-        match editor.readline("Sure? (y/N) ") {
+        match editor.readline("Continue? (y/N) ") {
             Ok(input) if input.trim().to_lowercase() == "y" => {}
             _ => {
-                println!("\n{} Canceled\n", "[ds]".yellow());
+                println!("{} Canceled", "[ds]".yellow());
                 return;
             }
         }
     }
 
-    *runtime = Runtime::new();
+    // re-init runtime
+    *runtime = Executor::init();
+    runtime.with_output_handler(Box::new(PlaygroundOutputHandler));
+
     code_buffer.clear();
-    println!("\n{} Successful\n", "[ds]".green());
+    println!("{} Environment reset", "[ds]".green());
 }
 
+/// Show help information
 fn show_help() {
-    println!("\n{} Available Commands:", "[ds]".cyan());
+    println!("{} Available Commands:", "[ds]".cyan());
 
-    println!("  {:<12} - Execute code in the buffer", ".run, .r");
-    println!("  {:<12} - Undo the last line of code", ".undo, .u");
     println!("  {:<12} - Clear the code buffer", ".clear, .c");
-    println!("  {:<12} - Display runtime trace", ".trace, .t");
     println!("  {:<12} - Save code to file (.save [path])", ".save, .s");
     println!("  {:<12} - Load code from file (.load [path])", ".load, .l");
     println!("  {:<12} - Show current code buffer", ".show, .sh");
@@ -406,17 +442,26 @@ fn show_help() {
     );
     println!("  {:<12} - Reset runtime environment", ".reset, .rs");
     println!("  {:<12} - Display this help information", ".help, .h");
-    println!("  {:<12} - Exit Playground", ".quit, .q");
+    println!("  {:<12} - Exit shell", ".quit, .q");
+
+    println!();
+
+    println!("{}", "Python-like REPL mode:".cyan());
+    println!("  - Type code to execute immediately");
+    println!("  - End a line with ':' or '{{' to start multi-line input");
+    println!("  - Press Enter on an empty line to execute multi-line code");
+    println!("  - Press Ctrl+C to cancel multi-line input");
     println!();
 }
 
+/// Confirm quit with unsaved changes
 fn confirm_quit(code_buffer: &[String], editor: &mut DefaultEditor) -> bool {
     if !code_buffer.is_empty() {
-        println!("\n{} There is unsaved code in the buffer", "[ds]".yellow());
-        match editor.readline("Sure? (y/N) ") {
+        println!("{} There is unsaved code in the buffer", "[ds]".yellow());
+        match editor.readline("Quit anyway? (y/N) ") {
             Ok(input) if input.trim().to_lowercase() == "y" => {}
             _ => {
-                println!("\n{} Canceled\n", "[ds]".yellow());
+                println!("{} Canceled", "[ds]".yellow());
                 return true;
             }
         }
@@ -426,6 +471,7 @@ fn confirm_quit(code_buffer: &[String], editor: &mut DefaultEditor) -> bool {
     false
 }
 
+/// Auto-save buffer contents (unused but kept for reference)
 #[allow(dead_code)]
 fn auto_save(code_buffer: &[String]) {
     if code_buffer.is_empty() {

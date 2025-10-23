@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use nom::{
     error::{VerboseError, VerboseErrorKind},
     Offset,

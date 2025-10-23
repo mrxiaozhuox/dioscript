@@ -5,7 +5,6 @@ use nom::{combinator::all_consuming, Finish};
 use crate::{
     error::{simplify_error, ParseError},
     parser::{parse_rsx, CalcExpr},
-    types::AstValue,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +42,8 @@ pub enum DioAstStatement {
     LineComment(String),
     FunctionCall(FunctionCall),
     FunctionDefine(FunctionDefine),
+
+    CalcExpr(CalcExpr),
 
     ModuleUse(UseStatement),
 }
@@ -85,14 +86,9 @@ impl FunctionName {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDefine {
     pub name: Option<String>,
-    pub params: ParamsType,
+    pub params: Vec<String>,
+    pub variadic_param: Option<String>,
     pub inner: Vec<DioAstStatement>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ParamsType {
-    Variable(String),
-    List(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -114,7 +110,7 @@ pub struct UseStatement(pub Vec<String>);
 #[derive(Debug, Clone, PartialEq)]
 pub enum LoopExecuteType {
     Conditional(CalcExpr),
-    Iter { iter: AstValue, var: String },
+    Iter { iter: CalcExpr, var: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]

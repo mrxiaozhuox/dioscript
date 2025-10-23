@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use dioscript_parser::ast::{CalculateMark, FunctionDefine};
 use uuid::Uuid;
 
-use crate::error::RuntimeError;
+use super::error::RuntimeError;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -21,10 +21,11 @@ pub enum Value {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FunctionType {
-    Rusty((crate::module::RustyFunction, i32)),
-    DScript(FunctionDefine),
+    Rusty((super::module::RustyFunction, i32)),
+    DScript((FunctionDefine, HashMap<String, Uuid>)),
 }
 
+#[allow(warnings)]
 impl ToString for Value {
     fn to_string(&self) -> String {
         match self {
@@ -32,7 +33,7 @@ impl ToString for Value {
             Value::String(v) => v.clone(),
             Value::Number(v) => v.to_string(),
             Value::Boolean(v) => v.to_string(),
-            Value::List(_) => "[ /* list */ ]".to_string(),
+            Value::List(list) => "[ /* list */ ]".to_string(),
             Value::Dict(_) => "{ /* dict */ }".to_string(),
             Value::Tuple(_) => "( /* tuple */ )".to_string(),
             Value::Element(_) => "element { /* element attributes */  }".to_string(),

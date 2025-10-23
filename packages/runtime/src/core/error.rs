@@ -28,9 +28,6 @@ pub enum RuntimeError {
     #[error("function `{name}` not found.")]
     FunctionNotFound { name: String },
 
-    #[error("`{name}` pointer data not found")]
-    PoniterDataNotFound { name: String },
-
     #[error("cannot use `{value_type}` in conditional statement.")]
     IllegalTypeInConditional { value_type: String },
 
@@ -55,7 +52,7 @@ pub enum RuntimeError {
     #[error("unknown attribute `{attr}` for `{value}` data.")]
     UnknownAttribute { attr: String, value: String },
 
-    #[error("module: `{module}` not found.")]
+    #[error("module `{module}` not found.")]
     ModuleNotFound { module: String },
 
     #[error("cannot find namespace `{part}` in `{module}` module.")]
@@ -66,4 +63,16 @@ pub enum RuntimeError {
 
     #[error("keyword `{keyword}` cannot become a function & variable name.")]
     UsingReservedKeyword { keyword: String },
+
+    #[error("expected type: `{expect_type}`, receive type: `{receive_type}`")]
+    UnsupportDataType {
+        expect_type: String,
+        receive_type: String,
+    },
+
+    #[error("trying to access an unknwon pointer: `{pointer}`")]
+    UnknownPointer { pointer: String },
+
+    #[error("Circular reference detected.")]
+    CircularReference,
 }

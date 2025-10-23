@@ -17,6 +17,7 @@ pub enum AstValue {
     Tuple((Box<CalcExpr>, Box<CalcExpr>)),
     Element(AstElement),
     Variable(String),
+    Reference(String),
     VariableIndex((String, Box<CalcExpr>)),
     FunctionCaller(FunctionCall),
     FunctionDefine(FunctionDefine),
@@ -37,6 +38,7 @@ impl AstValue {
             AstValue::VariableIndex(_) => "variable[index]",
             AstValue::FunctionCaller(_) => "call[func]",
             AstValue::FunctionDefine(_) => "def[func]",
+            AstValue::Reference(_) => "reference",
         }
         .to_string()
     }
@@ -103,6 +105,14 @@ impl AstValue {
 
     pub fn as_variable(&self) -> Option<String> {
         if let Self::Variable(s) = self {
+            Some(s.to_string())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_reference(&self) -> Option<String> {
+        if let Self::Reference(s) = self {
             Some(s.to_string())
         } else {
             None

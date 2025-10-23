@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::anyhow;
-use dioscript_runtime::types::Value;
+use dioscript_runtime::Value;
 
 use crate::BuildArgs;
 
@@ -31,10 +31,10 @@ pub fn build(args: &BuildArgs) -> anyhow::Result<String> {
     };
 
     match build_target {
-        BuildTarget::Static => {
+        BuildTarget::HtmlStatic => {
             let ast = dioscript_parser::ast::DioscriptAst::from_string(&file_content)?;
-            let mut runtime = dioscript_runtime::Runtime::new();
-            let result = runtime.execute_ast(ast)?;
+            let mut runtime = dioscript_runtime::Executor::init();
+            let result = runtime.execute(ast)?;
             if let Value::Element(e) = result {
                 let html = template.replace("<dioscript />", &e.to_html());
                 if !PathBuf::from(out_dir).is_dir() {
@@ -51,14 +51,14 @@ pub fn build(args: &BuildArgs) -> anyhow::Result<String> {
 }
 
 pub enum BuildTarget {
-    Static,
+    HtmlStatic,
     Unknown,
 }
 
 impl BuildTarget {
     pub fn from_str(name: &str) -> Self {
         match name.to_lowercase().as_str() {
-            "static" => Self::Static,
+            "html@static" => Self::HtmlStatic,
             _ => Self::Unknown,
         }
     }
