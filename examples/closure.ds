@@ -16,3 +16,18 @@ print(add());
 print(add());
 // 3
 print(add());
+
+
+// data: top level var
+let data = 100;
+
+fn first() {
+    data = 9;
+    second();
+}
+
+fn second() {
+    x = 8;
+}
+
+first();

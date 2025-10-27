@@ -5,7 +5,7 @@ use dioscript_parser::{
         CalculateMark, DioAstStatement, FunctionCall, FunctionDefine, FunctionName, LoopExecuteType,
     },
     element::{AstElement, AstElementContentType},
-    parser::{CalcExpr, LinkExpr},
+    parser::{CalcExpr, LinkExpr, LinkExprPart},
     types::AstValue,
 };
 use uuid::Uuid;
@@ -72,120 +72,151 @@ impl Runtime {
     }
 
     pub fn collect_free_vars(&self, func: &FunctionDefine) -> HashMap<String, Uuid> {
-        let mut bound: HashSet<String> = func.params.iter().cloned().collect();
-        if let Some(v) = &func.variadic_param {
-            bound.insert(v.clone());
-        }
-        let mut free: HashSet<String> = HashSet::new();
+        let func_name = &func.name;
 
-        fn walk_stmt(
-            st: &DioAstStatement,
-            bound: &mut HashSet<String>,
-            free: &mut HashSet<String>,
-        ) {
-            match st {
-                DioAstStatement::VariableAss(var) => {
-                    walk_expr(&var.expr, bound, free);
-                    bound.insert(var.name.clone());
-                }
+        let mut env = HashMap::new();
 
-                DioAstStatement::FunctionDefine(fd) => {
-                    if let Some(name) = &fd.name {
-                        bound.insert(name.clone());
-                    }
-                    for inner in &fd.inner {
-                        walk_stmt(inner, bound, free);
-                    }
-                }
-
-                DioAstStatement::IfStatement(ifst) => {
-                    walk_expr(&ifst.condition, bound, free);
-                    for s in &ifst.inner {
-                        walk_stmt(s, bound, free);
-                    }
-                    if let Some(oth) = &ifst.otherwise {
-                        for s in oth {
-                            walk_stmt(s, bound, free);
-                        }
+        for scope in self.scopes.iter().rev() {
+            for (k, id) in &scope.data {
+                if let Some(name) = func_name {
+                    if k == name {
+                        continue;
                     }
                 }
-                DioAstStatement::LoopStatement(lp) => {
-                    match &lp.execute_type {
-                        LoopExecuteType::Conditional(e) => {
-                            walk_expr(e, bound, free);
-                        }
-                        LoopExecuteType::Iter { iter, var } => {
-                            walk_expr(iter, bound, free);
-                            bound.insert(var.clone());
-                        }
-                    }
-                    for s in &lp.inner {
-                        walk_stmt(s, bound, free);
-                    }
-                }
-
-                DioAstStatement::FunctionCall(fc) => {
-                    for e in &fc.arguments {
-                        walk_expr(e, bound, free);
-                    }
-                }
-                DioAstStatement::ReturnValue(e) | DioAstStatement::CalcExpr(e) => {
-                    walk_expr(e, bound, free)
-                }
-                _ => {}
+                env.entry(k.clone()).or_insert(*id);
+            }
+            if scope.isolate {
+                break;
             }
         }
 
-        fn walk_expr(expr: &CalcExpr, bound: &mut HashSet<String>, free: &mut HashSet<String>) {
-            match expr {
-                CalcExpr::Value(AstValue::Variable(name)) => {
-                    if !bound.contains(name) {
-                        free.insert(name.clone());
-                    }
-                }
-                CalcExpr::Value(AstValue::VariableIndex((name, idx))) => {
-                    if !bound.contains(name) {
-                        free.insert(name.clone());
-                    }
-                    walk_expr(idx, bound, free);
-                }
-                CalcExpr::Value(_) => {}
-                CalcExpr::LinkExpr(link) => {
-                    // link.this
-                    if let AstValue::Variable(n) = &link.this {
-                        if !bound.contains(n) {
-                            free.insert(n.clone());
-                        }
-                    }
-                    // arguments inside link parts etc...
-                }
-                CalcExpr::Add(l, r)
-                | CalcExpr::Sub(l, r)
-                | CalcExpr::Mul(l, r)
-                | CalcExpr::Div(l, r)
-                | CalcExpr::Mod(l, r)
-                | CalcExpr::Eq(l, r)
-                | CalcExpr::Ne(l, r)
-                | CalcExpr::Gt(l, r)
-                | CalcExpr::Lt(l, r)
-                | CalcExpr::Ge(l, r)
-                | CalcExpr::Le(l, r)
-                | CalcExpr::And(l, r)
-                | CalcExpr::Or(l, r) => {
-                    walk_expr(l, bound, free);
-                    walk_expr(r, bound, free);
-                }
-            }
-        }
-
-        for s in &func.inner {
-            walk_stmt(s, &mut bound, &mut free);
-        }
-
-        free.into_iter()
-            .filter_map(|name| self.get_var(&name).ok().map(|(id, _v)| (name, id)))
-            .collect()
+        env
     }
+
+    // WARNING:
+    // this should be a better solution, but will only use for new version, so just comment this part
+    //
+    // pub fn collect_free_vars(&self, func: &FunctionDefine) -> HashMap<String, Uuid> {
+    //     let mut bound: HashSet<String> = func.params.iter().cloned().collect();
+    //     if let Some(v) = &func.variadic_param {
+    //         bound.insert(v.clone());
+    //     }
+    //     let mut free: HashSet<String> = HashSet::new();
+    //
+    //     fn walk_stmt(
+    //         st: &DioAstStatement,
+    //         bound: &mut HashSet<String>,
+    //         free: &mut HashSet<String>,
+    //     ) {
+    //         match st {
+    //             DioAstStatement::VariableAss(var) => {
+    //                 walk_expr(&var.expr, bound, free);
+    //                 bound.insert(var.name.clone());
+    //             }
+    //
+    //             DioAstStatement::FunctionDefine(fd) => {
+    //                 if let Some(name) = &fd.name {
+    //                     bound.insert(name.clone());
+    //                 }
+    //                 for inner in &fd.inner {
+    //                     walk_stmt(inner, bound, free);
+    //                 }
+    //             }
+    //
+    //             DioAstStatement::IfStatement(ifst) => {
+    //                 walk_expr(&ifst.condition, bound, free);
+    //                 for s in &ifst.inner {
+    //                     walk_stmt(s, bound, free);
+    //                 }
+    //                 if let Some(oth) = &ifst.otherwise {
+    //                     for s in oth {
+    //                         walk_stmt(s, bound, free);
+    //                     }
+    //                 }
+    //             }
+    //             DioAstStatement::LoopStatement(lp) => {
+    //                 match &lp.execute_type {
+    //                     LoopExecuteType::Conditional(e) => {
+    //                         walk_expr(e, bound, free);
+    //                     }
+    //                     LoopExecuteType::Iter { iter, var } => {
+    //                         walk_expr(iter, bound, free);
+    //                         bound.insert(var.clone());
+    //                     }
+    //                 }
+    //                 for s in &lp.inner {
+    //                     walk_stmt(s, bound, free);
+    //                 }
+    //             }
+    //
+    //             DioAstStatement::FunctionCall(fc) => {
+    //                 for e in &fc.arguments {
+    //                     walk_expr(e, bound, free);
+    //                 }
+    //             }
+    //             DioAstStatement::ReturnValue(e) | DioAstStatement::CalcExpr(e) => {
+    //                 walk_expr(e, bound, free)
+    //             }
+    //             _ => {}
+    //         }
+    //     }
+    //
+    //     fn walk_expr(expr: &CalcExpr, bound: &mut HashSet<String>, free: &mut HashSet<String>) {
+    //         match expr {
+    //             CalcExpr::Value(AstValue::Variable(name)) => {
+    //                 if !bound.contains(name) {
+    //                     free.insert(name.clone());
+    //                 }
+    //             }
+    //             CalcExpr::Value(AstValue::VariableIndex((name, idx))) => {
+    //                 if !bound.contains(name) {
+    //                     free.insert(name.clone());
+    //                 }
+    //                 walk_expr(idx, bound, free);
+    //             }
+    //             CalcExpr::Value(_) => {}
+    //             CalcExpr::LinkExpr(link) => {
+    //                 // link.this
+    //                 if let AstValue::Variable(n) = &link.this {
+    //                     if !bound.contains(n) {
+    //                         free.insert(n.clone());
+    //                     }
+    //                 }
+    //                 for part in &link.list {
+    //                     if let LinkExprPart::FunctionCall(fc) = part {
+    //                         for arg in &fc.arguments {
+    //                             walk_expr(arg, bound, free);
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //             CalcExpr::Add(l, r)
+    //             | CalcExpr::Sub(l, r)
+    //             | CalcExpr::Mul(l, r)
+    //             | CalcExpr::Div(l, r)
+    //             | CalcExpr::Mod(l, r)
+    //             | CalcExpr::Eq(l, r)
+    //             | CalcExpr::Ne(l, r)
+    //             | CalcExpr::Gt(l, r)
+    //             | CalcExpr::Lt(l, r)
+    //             | CalcExpr::Ge(l, r)
+    //             | CalcExpr::Le(l, r)
+    //             | CalcExpr::And(l, r)
+    //             | CalcExpr::Or(l, r) => {
+    //                 walk_expr(l, bound, free);
+    //                 walk_expr(r, bound, free);
+    //             }
+    //         }
+    //     }
+    //
+    //     for s in &func.inner {
+    //         walk_stmt(s, &mut bound, &mut free);
+    //     }
+    //
+    //     free.into_iter()
+    //         .filter_map(|name| self.get_var(&name).ok().map(|(id, _v)| (name, id)))
+    //         .collect()
+    // }
 
     pub fn get_ref_value(&self, id: &Uuid) -> Result<Value, RuntimeError> {
         if let Some(DataType::Variable(var)) = self.data.get(id) {
