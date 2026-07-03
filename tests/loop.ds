@@ -1,0 +1,5 @@
+let arr = [10, 20, 30];
+for i in arr {
+  print(i);
+}
+return "done";

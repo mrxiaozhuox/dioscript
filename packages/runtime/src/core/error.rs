@@ -1,5 +1,6 @@
 use dioscript_parser::error::ParseError;
 
+#[allow(dead_code)] // Public API type used by external consumers
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("runtime execute failed: {0}")]

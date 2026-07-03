@@ -7,12 +7,23 @@ use crate::{
 pub mod output;
 
 pub fn type_name(_: RustyExecutor, args: Vec<Value>) -> Result<Value, RuntimeError> {
-    let name = args.first().unwrap().value_name();
+    let name = args
+        .first()
+        .ok_or(RuntimeError::IllegalArgumentsNumber {
+            need: 1,
+            provided: 0,
+        })?
+        .value_name();
     Ok(Value::String(name))
 }
 
 pub fn execute(mut rt: RustyExecutor, args: Vec<Value>) -> Result<Value, RuntimeError> {
-    let value = args.first().unwrap();
+    let value = args
+        .first()
+        .ok_or(RuntimeError::IllegalArgumentsNumber {
+            need: 1,
+            provided: 0,
+        })?;
     if let Value::String(v) = value {
         return rt.execute(v, false);
     }

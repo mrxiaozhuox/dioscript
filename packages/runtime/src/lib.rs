@@ -1,5 +1,7 @@
 mod core;
 mod library;
+#[cfg(test)]
+mod tests;
 
 use core::error::RuntimeError;
 use core::io::output::ConsoleOutputHandler;

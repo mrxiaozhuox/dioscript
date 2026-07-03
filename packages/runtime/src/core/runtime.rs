@@ -5,7 +5,7 @@ use dioscript_parser::{
         CalculateMark, DioAstStatement, FunctionCall, FunctionDefine, FunctionName, LoopExecuteType,
     },
     element::{AstElement, AstElementContentType},
-    parser::{CalcExpr, LinkExpr, LinkExprPart},
+    parser::{CalcExpr, LinkExpr},
     types::AstValue,
 };
 use uuid::Uuid;
@@ -373,8 +373,10 @@ impl Runtime {
                             let iter = self.execute_calculate(iter)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
+                                    self.enter_scope(false);
                                     self.create_var(&var, i.clone())?;
-                                    let res = self.execute_scope(data.inner.clone())?;
+                                    let res = self.execute_scope_without_new_scope(data.inner.clone())?;
+                                    self.leave_scope();
                                     if !res.as_none() {
                                         result = res;
                                         finish = true;
@@ -389,8 +391,9 @@ impl Runtime {
                     let _result = self.execute_function(func)?;
                 }
                 DioAstStatement::FunctionDefine(define) => {
-                    let f = self.add_script_function(define)?;
-                    if f.0.is_none() {
+                    // Named functions were already registered in collect_functions.
+                    // Only anonymous functions need handling here.
+                    if define.name.is_none() {
                         return Err(RuntimeError::AnonymousFunctionInRoot);
                     }
                 }
@@ -403,7 +406,7 @@ impl Runtime {
         Ok(result)
     }
 
-    pub fn to_value(&mut self, value: AstValue) -> Result<Value, RuntimeError> {
+    pub fn eval_ast_value(&mut self, value: AstValue) -> Result<Value, RuntimeError> {
         match value {
             AstValue::None => Ok(Value::None),
             AstValue::String(v) => Ok(Value::String(v)),
@@ -430,7 +433,7 @@ impl Runtime {
                 Ok(Value::Tuple((Box::new(a), Box::new(b))))
             }
             AstValue::Element(e) => {
-                let element = self.to_element(e)?;
+                let element = self.eval_ast_element(e)?;
                 Ok(Value::Element(element))
             }
             AstValue::Variable(n) => {
@@ -439,7 +442,7 @@ impl Runtime {
                 Ok(value)
             }
             AstValue::VariableIndex((n, i)) => {
-                let value = self.to_value(AstValue::Variable(n))?;
+                let value = self.eval_ast_value(AstValue::Variable(n))?;
                 let index = self.execute_calculate(*i)?;
                 let data = self.get_from_index(value, index)?;
                 Ok(data)
@@ -670,7 +673,7 @@ impl Runtime {
 
     pub fn execute_calculate(&mut self, expr: CalcExpr) -> Result<Value, RuntimeError> {
         match expr {
-            CalcExpr::Value(v) => Ok(self.to_value(v)?),
+            CalcExpr::Value(v) => Ok(self.eval_ast_value(v)?),
             CalcExpr::LinkExpr(v) => Ok(self.execute_link_expr(v)?),
             CalcExpr::Add(l, r) => {
                 let l = self.execute_calculate(*l)?;
@@ -692,11 +695,10 @@ impl Runtime {
                 let r = self.execute_calculate(*r)?;
                 l.calc(&r, CalculateMark::Divide)
             }
-            CalcExpr::Mod(_l, _r) => {
-                // let l = self.execute_calculate(*l)?;
-                // let r = self.execute_calculate(*r)?;
-                // l.calc(&r, CalculateMark::Mod)
-                Ok(Value::Boolean(false))
+            CalcExpr::Mod(l, r) => {
+                let l = self.execute_calculate(*l)?;
+                let r = self.execute_calculate(*r)?;
+                l.calc(&r, CalculateMark::Mod)
             }
             CalcExpr::Eq(l, r) => {
                 let l = self.execute_calculate(*l)?;
@@ -743,7 +745,7 @@ impl Runtime {
 
     pub fn execute_link_expr(&mut self, v: LinkExpr) -> Result<Value, RuntimeError> {
         // if `this` was a var, get the ref-id
-        let meta_this = self.to_value(v.this.clone())?;
+        let meta_this = self.eval_ast_value(v.this.clone())?;
         let mut this = if let AstValue::Variable(var_name) = &v.this {
             let (id, _) = self.get_var(var_name)?;
             Value::Reference(id)
@@ -920,6 +922,12 @@ impl Runtime {
         match &value {
             Value::String(v) => {
                 if let Value::Number(num) = index {
+                    if num < 0.0 || num.is_nan() || num.is_infinite() || num.fract() != 0.0 {
+                        return Err(RuntimeError::IndexNotFound {
+                            index: format!("{}", num),
+                            value: value.value_name(),
+                        });
+                    }
                     let num = num as usize;
                     let chars = v.chars();
                     let c = chars.collect::<Vec<char>>();
@@ -927,7 +935,7 @@ impl Runtime {
                         Ok(Value::String(c[num].to_string()))
                     } else {
                         Err(RuntimeError::IndexNotFound {
-                            index: index.value_name(),
+                            index: format!("{}", num),
                             value: value.value_name(),
                         })
                     }
@@ -940,13 +948,19 @@ impl Runtime {
             }
             Value::List(v) => {
                 if let Value::Number(num) = index {
+                    if num < 0.0 || num.is_nan() || num.is_infinite() || num.fract() != 0.0 {
+                        return Err(RuntimeError::IndexNotFound {
+                            index: format!("{}", num),
+                            value: value.value_name(),
+                        });
+                    }
                     let num = num as usize;
                     if v.len() > num {
                         let v = v[num].clone();
                         Ok(v)
                     } else {
                         Err(RuntimeError::IndexNotFound {
-                            index: index.value_name(),
+                            index: format!("{}", num),
                             value: value.value_name(),
                         })
                     }
@@ -976,6 +990,12 @@ impl Runtime {
             }
             Value::Tuple(v) => {
                 if let Value::Number(num) = index {
+                    if num < 0.0 || num.is_nan() || num.is_infinite() || num.fract() != 0.0 {
+                        return Err(RuntimeError::IndexNotFound {
+                            index: format!("{}", num),
+                            value: value.value_name(),
+                        });
+                    }
                     let num = num as usize;
                     if num == 0 {
                         Ok(*v.0.clone())
@@ -983,7 +1003,7 @@ impl Runtime {
                         Ok(*v.1.clone())
                     } else {
                         Err(RuntimeError::IndexNotFound {
-                            index: index.value_name(),
+                            index: format!("{}", num),
                             value: value.value_name(),
                         })
                     }
@@ -1001,18 +1021,18 @@ impl Runtime {
         }
     }
 
-    pub fn to_element(&mut self, element: AstElement) -> Result<Element, RuntimeError> {
+    pub fn eval_ast_element(&mut self, element: AstElement) -> Result<Element, RuntimeError> {
         let mut attrs = HashMap::new();
         for i in element.attributes {
             let name = i.0;
             let data = i.1;
-            attrs.insert(name, self.to_value(data)?);
+            attrs.insert(name, self.eval_ast_value(data)?);
         }
         let mut content = vec![];
         for i in element.content {
             match i {
                 AstElementContentType::Children(v) => {
-                    let executed_element = self.to_element(v)?;
+                    let executed_element = self.eval_ast_element(v)?;
                     content.push(ElementContentType::Children(executed_element));
                 }
                 AstElementContentType::Content(v) => {
@@ -1074,8 +1094,10 @@ impl Runtime {
                             let iter = self.execute_calculate(iter)?;
                             if iter.value_name() == "list" {
                                 for i in iter.as_list().unwrap() {
+                                    self.enter_scope(false);
                                     self.create_var(&var, i.clone())?;
-                                    let temp = self.execute_scope(v.inner.clone())?;
+                                    let temp = self.execute_scope_without_new_scope(v.inner.clone())?;
+                                    self.leave_scope();
                                     if let Value::Tuple((k, v)) = &temp {
                                         if let Value::String(k) = *k.clone() {
                                             attrs.insert(k.to_string(), *v.clone());

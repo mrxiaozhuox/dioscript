@@ -9,7 +9,7 @@ pub trait OutputHandler: Send {
 pub struct ConsoleOutputHandler;
 impl OutputHandler for ConsoleOutputHandler {
     fn print(&mut self, content: Value) {
-        print!("{}", content.to_string());
+        print!("{}", content);
         std::io::stdout().flush().ok();
     }
 }

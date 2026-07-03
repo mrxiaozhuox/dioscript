@@ -72,7 +72,7 @@ struct TypeParser;
 impl TypeParser {
     // string
 
-    pub fn string(i: &str) -> ParserResult<String> {
+    pub fn string(i: &str) -> ParserResult<'_, String> {
         let string_content = escaped_transform(
             take_till1(|c: char| c == '\\' || c == '"' || c.is_ascii_control()),
             '\\',
@@ -93,17 +93,17 @@ impl TypeParser {
     }
 
     // boolean
-    pub fn boolean(message: &str) -> ParserResult<bool> {
+    pub fn boolean(message: &str) -> ParserResult<'_, bool> {
         let parse_true = value(true, tag_no_case("true"));
         let parse_false = value(false, tag_no_case("false"));
         alt((parse_true, parse_false))(message)
     }
 
-    pub fn number(message: &str) -> ParserResult<f64> {
+    pub fn number(message: &str) -> ParserResult<'_, f64> {
         double(message)
     }
 
-    pub fn list(message: &str) -> ParserResult<Vec<CalcExpr>> {
+    pub fn list(message: &str) -> ParserResult<'_, Vec<CalcExpr>> {
         context(
             "list",
             delimited(
@@ -117,14 +117,14 @@ impl TypeParser {
         )(message)
     }
 
-    fn variable(message: &str) -> ParserResult<String> {
+    fn variable(message: &str) -> ParserResult<'_, String> {
         context(
             "variable",
             map(VariableParser::parse_var_name, |v| v.to_string()),
         )(message)
     }
 
-    pub fn reference(message: &str) -> ParserResult<String> {
+    pub fn reference(message: &str) -> ParserResult<'_, String> {
         context(
             "reference",
             map(
@@ -134,7 +134,7 @@ impl TypeParser {
         )(message)
     }
 
-    fn variable_index(message: &str) -> ParserResult<(String, Box<CalcExpr>)> {
+    fn variable_index(message: &str) -> ParserResult<'_, (String, Box<CalcExpr>)> {
         context(
             "variable index",
             map(
@@ -147,7 +147,7 @@ impl TypeParser {
         )(message)
     }
 
-    fn dict(message: &str) -> ParserResult<HashMap<String, CalcExpr>> {
+    fn dict(message: &str) -> ParserResult<'_, HashMap<String, CalcExpr>> {
         context(
             "object",
             delimited(
@@ -168,7 +168,7 @@ impl TypeParser {
         )(message)
     }
 
-    fn tuple(message: &str) -> ParserResult<(Box<CalcExpr>, Box<CalcExpr>)> {
+    fn tuple(message: &str) -> ParserResult<'_, (Box<CalcExpr>, Box<CalcExpr>)> {
         context(
             "tuple",
             delimited(
@@ -186,7 +186,7 @@ impl TypeParser {
         )(message)
     }
 
-    pub fn parse(message: &str) -> ParserResult<AstValue> {
+    pub fn parse(message: &str) -> ParserResult<'_, AstValue> {
         context(
             "value",
             alt((
@@ -209,7 +209,7 @@ impl TypeParser {
 
 struct VariableParser;
 impl VariableParser {
-    fn parse_var_name(message: &str) -> ParserResult<String> {
+    fn parse_var_name(message: &str) -> ParserResult<'_, String> {
         context(
             "var name",
             map(
@@ -222,7 +222,7 @@ impl VariableParser {
         )(message)
     }
 
-    fn parse(message: &str) -> ParserResult<VariableDefine> {
+    fn parse(message: &str) -> ParserResult<'_, VariableDefine> {
         context(
             "variable",
             map(
@@ -244,7 +244,7 @@ impl VariableParser {
 
 struct CalculateParser;
 impl CalculateParser {
-    fn factor(input: &str) -> ParserResult<CalcExpr> {
+    fn factor(input: &str) -> ParserResult<'_, CalcExpr> {
         delimited(
             space0,
             alt((
@@ -256,7 +256,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn link(input: &str) -> ParserResult<LinkExpr> {
+    fn link(input: &str) -> ParserResult<'_, LinkExpr> {
         delimited(
             space0,
             map(
@@ -288,7 +288,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn term(input: &str) -> ParserResult<CalcExpr> {
+    fn term(input: &str) -> ParserResult<'_, CalcExpr> {
         let (input, init) = Self::factor(input)?;
         fold_many0(
             pair(
@@ -305,7 +305,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn add_sub(input: &str) -> ParserResult<CalcExpr> {
+    fn add_sub(input: &str) -> ParserResult<'_, CalcExpr> {
         let (input, init) = Self::term(input)?;
         fold_many0(
             pair(
@@ -321,7 +321,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn comparison(input: &str) -> ParserResult<CalcExpr> {
+    fn comparison(input: &str) -> ParserResult<'_, CalcExpr> {
         let (input, init) = Self::add_sub(input)?;
         fold_many0(
             pair(
@@ -352,7 +352,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn logical_and(input: &str) -> ParserResult<CalcExpr> {
+    fn logical_and(input: &str) -> ParserResult<'_, CalcExpr> {
         let (input, init) = Self::comparison(input)?;
         fold_many0(
             pair(delimited(space0, tag("&&"), space0), Self::comparison),
@@ -361,7 +361,7 @@ impl CalculateParser {
         )(input)
     }
 
-    fn logical_or(input: &str) -> ParserResult<CalcExpr> {
+    fn logical_or(input: &str) -> ParserResult<'_, CalcExpr> {
         let (input, init) = Self::logical_and(input)?;
         fold_many0(
             pair(delimited(space0, tag("||"), space0), Self::logical_and),
@@ -370,14 +370,14 @@ impl CalculateParser {
         )(input)
     }
 
-    fn expr(input: &str) -> ParserResult<CalcExpr> {
+    fn expr(input: &str) -> ParserResult<'_, CalcExpr> {
         Self::logical_or(input)
     }
 }
 
 struct FunctionParser;
 impl FunctionParser {
-    fn call(message: &str) -> ParserResult<FunctionCall> {
+    fn call(message: &str) -> ParserResult<'_, FunctionCall> {
         context(
             "function call",
             map(
@@ -407,7 +407,7 @@ impl FunctionParser {
         )(message)
     }
 
-    fn call_single_name(message: &str) -> ParserResult<FunctionCall> {
+    fn call_single_name(message: &str) -> ParserResult<'_, FunctionCall> {
         context(
             "function call single",
             map(
@@ -428,7 +428,7 @@ impl FunctionParser {
         )(message)
     }
 
-    fn parse_param_list(i: &str) -> ParserResult<(Vec<String>, Option<String>)> {
+    fn parse_param_list(i: &str) -> ParserResult<'_, (Vec<String>, Option<String>)> {
         let ident = |input| delimited(space0, VariableParser::parse_var_name, space0)(input);
 
         let (i, fixed) = separated_list0(delimited(space0, char(','), space0), ident)(i)?;
@@ -441,7 +441,7 @@ impl FunctionParser {
         Ok((i, (fixed, variadic)))
     }
 
-    fn define(message: &str) -> ParserResult<FunctionDefine> {
+    fn define(message: &str) -> ParserResult<'_, FunctionDefine> {
         context(
             "function define",
             map(
@@ -468,7 +468,7 @@ impl FunctionParser {
 
 struct StatementParser;
 impl StatementParser {
-    fn parse_if(message: &str) -> ParserResult<ConditionalStatement> {
+    fn parse_if(message: &str) -> ParserResult<'_, ConditionalStatement> {
         context(
             "if statment",
             map(
@@ -495,7 +495,7 @@ impl StatementParser {
         )(message)
     }
 
-    fn parse_for(message: &str) -> ParserResult<LoopStatement> {
+    fn parse_for(message: &str) -> ParserResult<'_, LoopStatement> {
         context(
             "for statement",
             map(
@@ -520,7 +520,7 @@ impl StatementParser {
         )(message)
     }
 
-    fn parse_while(message: &str) -> ParserResult<LoopStatement> {
+    fn parse_while(message: &str) -> ParserResult<'_, LoopStatement> {
         context(
             "while statement",
             map(
@@ -544,11 +544,11 @@ impl ModuleParser {
         matches!(c, 'a'..='z' | '_')
     }
 
-    fn parse_module_name(message: &str) -> ParserResult<&str> {
+    fn parse_module_name(message: &str) -> ParserResult<'_, &str> {
         context("module name", take_while1(Self::module_name_style))(message)
     }
 
-    fn parse_use(message: &str) -> ParserResult<UseStatement> {
+    fn parse_use(message: &str) -> ParserResult<'_, UseStatement> {
         context(
             "use statement",
             map(
@@ -565,7 +565,7 @@ impl ModuleParser {
 
 struct ElementParser;
 impl ElementParser {
-    fn parse_element_name(message: &str) -> ParserResult<&str> {
+    fn parse_element_name(message: &str) -> ParserResult<'_, &str> {
         context("element name", alphanumeric1)(message)
     }
 
@@ -573,11 +573,11 @@ impl ElementParser {
         matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '-')
     }
 
-    fn parse_attr_name(message: &str) -> ParserResult<&str> {
+    fn parse_attr_name(message: &str) -> ParserResult<'_, &str> {
         context("element name", take_while1(Self::attr_name_style))(message)
     }
 
-    fn parse(message: &str) -> ParserResult<AstElement> {
+    fn parse(message: &str) -> ParserResult<'_, AstElement> {
         context(
             "element",
             map(
@@ -759,7 +759,7 @@ impl ElementParser {
     }
 }
 
-fn comment(message: &str) -> ParserResult<String> {
+fn comment(message: &str) -> ParserResult<'_, String> {
     context(
         "Comment",
         map(
@@ -769,7 +769,7 @@ fn comment(message: &str) -> ParserResult<String> {
     )(message)
 }
 
-pub(crate) fn parse_rsx(message: &str) -> ParserResult<Vec<DioAstStatement>> {
+pub(crate) fn parse_rsx(message: &str) -> ParserResult<'_, Vec<DioAstStatement>> {
     context(
         "AST Full",
         many0(delimited(

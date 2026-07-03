@@ -1,0 +1,1 @@
+return div { "<script>alert(1)</script>", title: "a\" onclick=\"alert(2)" };

@@ -121,6 +121,7 @@ pub enum CalculateMark {
     Minus,
     Multiply,
     Divide,
+    Mod,
 
     Equal,
     NotEqual,
@@ -132,25 +133,25 @@ pub enum CalculateMark {
     Or,
 }
 
-impl ToString for CalculateMark {
-    fn to_string(&self) -> String {
-        match self {
-            CalculateMark::None => "none".to_string(),
-
-            CalculateMark::Plus => "+".to_string(),
-            CalculateMark::Minus => "-".to_string(),
-            CalculateMark::Multiply => "*".to_string(),
-            CalculateMark::Divide => "/".to_string(),
-
-            CalculateMark::Equal => "==".to_string(),
-            CalculateMark::NotEqual => "!=".to_string(),
-            CalculateMark::Large => ">".to_string(),
-            CalculateMark::Small => "<".to_string(),
-            CalculateMark::LargeOrEqual => ">=".to_string(),
-            CalculateMark::SmallOrEqual => "<=".to_string(),
-            CalculateMark::And => "&&".to_string(),
-            CalculateMark::Or => "||".to_string(),
-        }
+impl Display for CalculateMark {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let res = match self {
+            CalculateMark::None => "none",
+            CalculateMark::Plus => "+",
+            CalculateMark::Minus => "-",
+            CalculateMark::Multiply => "*",
+            CalculateMark::Divide => "/",
+            CalculateMark::Mod => "%",
+            CalculateMark::Equal => "==",
+            CalculateMark::NotEqual => "!=",
+            CalculateMark::Large => ">",
+            CalculateMark::Small => "<",
+            CalculateMark::LargeOrEqual => ">=",
+            CalculateMark::SmallOrEqual => "<=",
+            CalculateMark::And => "&&",
+            CalculateMark::Or => "||",
+        };
+        write!(f, "{}", res)
     }
 }
 
@@ -161,6 +162,7 @@ impl CalculateMark {
             "-" => Self::Minus,
             "*" => Self::Multiply,
             "/" => Self::Divide,
+            "%" => Self::Mod,
 
             "==" => Self::Equal,
             "!=" => Self::NotEqual,

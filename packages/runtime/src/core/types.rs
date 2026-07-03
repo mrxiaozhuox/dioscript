@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 
 use dioscript_parser::ast::{CalculateMark, FunctionDefine};
 use uuid::Uuid;
@@ -25,20 +26,19 @@ pub enum FunctionType {
     DScript((FunctionDefine, HashMap<String, Uuid>)),
 }
 
-#[allow(warnings)]
-impl ToString for Value {
-    fn to_string(&self) -> String {
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::None => "none".to_string(),
-            Value::String(v) => v.clone(),
-            Value::Number(v) => v.to_string(),
-            Value::Boolean(v) => v.to_string(),
-            Value::List(list) => "[ /* list */ ]".to_string(),
-            Value::Dict(_) => "{ /* dict */ }".to_string(),
-            Value::Tuple(_) => "( /* tuple */ )".to_string(),
-            Value::Element(_) => "element { /* element attributes */  }".to_string(),
-            Value::Function(_) => "fn () { /* function impl */  }".to_string(),
-            Value::Reference(_) => "/* &reference */".to_string(),
+            Value::None => write!(f, "none"),
+            Value::String(v) => write!(f, "{}", v),
+            Value::Number(v) => write!(f, "{}", v),
+            Value::Boolean(v) => write!(f, "{}", v),
+            Value::List(_) => write!(f, "[ /* list */ ]"),
+            Value::Dict(_) => write!(f, "{{ /* dict */ }}"),
+            Value::Tuple(_) => write!(f, "( /* tuple */ )"),
+            Value::Element(_) => write!(f, "element {{ /* element attributes */  }}"),
+            Value::Function(_) => write!(f, "fn () {{ /* function impl */  }}"),
+            Value::Reference(_) => write!(f, "/* &reference */"),
         }
     }
 }
@@ -158,21 +158,46 @@ impl Value {
             CalculateMark::Minus => match self {
                 Value::Number(v) => Ok(Self::Number(v - o.as_number().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
-                    operator: "+".to_string(),
+                    operator: "-".to_string(),
                     value_type: self.value_name(),
                 }),
             },
             CalculateMark::Multiply => match self {
                 Value::Number(v) => Ok(Self::Number(v * o.as_number().unwrap())),
                 _ => Err(RuntimeError::IllegalOperatorForType {
-                    operator: "+".to_string(),
+                    operator: "*".to_string(),
                     value_type: self.value_name(),
                 }),
             },
             CalculateMark::Divide => match self {
-                Value::Number(v) => Ok(Self::Number(v / o.as_number().unwrap())),
+                Value::Number(v) => {
+                    let divisor = o.as_number().unwrap();
+                    if divisor == 0.0 {
+                        return Err(RuntimeError::IllegalOperatorForType {
+                            operator: "/".to_string(),
+                            value_type: "zero divisor".to_string(),
+                        });
+                    }
+                    Ok(Self::Number(v / divisor))
+                }
                 _ => Err(RuntimeError::IllegalOperatorForType {
-                    operator: "+".to_string(),
+                    operator: "/".to_string(),
+                    value_type: self.value_name(),
+                }),
+            },
+            CalculateMark::Mod => match self {
+                Value::Number(v) => {
+                    let divisor = o.as_number().unwrap();
+                    if divisor == 0.0 {
+                        return Err(RuntimeError::IllegalOperatorForType {
+                            operator: "%".to_string(),
+                            value_type: "zero divisor".to_string(),
+                        });
+                    }
+                    Ok(Self::Number(v % divisor))
+                }
+                _ => Err(RuntimeError::IllegalOperatorForType {
+                    operator: "%".to_string(),
                     value_type: self.value_name(),
                 }),
             },
@@ -267,24 +292,47 @@ pub enum ElementContentType {
 }
 
 impl Element {
+    /// Escape text content for safe HTML embedding.
+    fn html_escape_content(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    }
+
+    /// Escape attribute values for safe HTML embedding.
+    fn html_escape_attr(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('"', "&quot;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    }
+
     pub fn to_html(&self) -> String {
         let mut attr_str = String::new();
         for (name, value) in &self.attributes {
             if let Value::String(value) = value {
-                attr_str.push_str(&format!(" {0}=\"{1}\"", name, value));
+                attr_str.push_str(&format!(
+                    " {0}=\"{1}\"",
+                    Self::html_escape_attr(name),
+                    Self::html_escape_attr(value)
+                ));
             } else if let Value::Boolean(value) = value {
                 if *value {
-                    attr_str.push_str(&format!(" {name}"));
+                    attr_str.push_str(&format!(" {}", Self::html_escape_attr(name)));
                 }
             } else if let Value::Number(value) = value {
-                attr_str.push_str(&format!(" {0}=\"{1}\"", name, value));
+                attr_str.push_str(&format!(
+                    " {0}=\"{1}\"",
+                    Self::html_escape_attr(name),
+                    value
+                ));
             }
         }
         let mut content_str = String::new();
         for sub in &self.content {
             let v = match sub {
                 ElementContentType::Children(v) => v.to_html(),
-                ElementContentType::Content(v) => v.clone(),
+                ElementContentType::Content(v) => Self::html_escape_content(v),
             };
             content_str.push_str(&v);
         }

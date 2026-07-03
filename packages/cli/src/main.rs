@@ -79,7 +79,7 @@ pub fn main() {
                     );
                 }
                 Err(e) => {
-                    print_error(e);
+                    print_error("Run", e);
                 }
             }
         }
@@ -89,7 +89,7 @@ pub fn main() {
             let duration = timer.elapsed();
             match r {
                 Err(e) => {
-                    print_error(e);
+                    print_error("Build", e);
                 }
                 Ok(v) => {
                     if args.open {
@@ -149,7 +149,7 @@ fn print_value_result(value: &Value) {
     }
 }
 
-fn print_error(e: anyhow::Error) {
-    println!("[ds] Build failed: {}", e.to_string().red().bold());
+fn print_error(command: &str, e: anyhow::Error) {
+    println!("[ds] {} failed: {}", command, e.to_string().red().bold());
     std::process::exit(1);
 }
