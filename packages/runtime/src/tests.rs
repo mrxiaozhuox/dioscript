@@ -129,6 +129,36 @@ fn test_or_false() {
     assert_eq!(exec_ok("return false || false;"), Value::Boolean(false));
 }
 
+#[test]
+fn test_and_short_circuits_rhs() {
+    assert_eq!(exec_ok("return false && type();"), Value::Boolean(false));
+}
+
+#[test]
+fn test_or_short_circuits_rhs() {
+    assert_eq!(exec_ok("return true || type();"), Value::Boolean(true));
+}
+
+#[test]
+fn test_function_error_cleans_up_scope() {
+    let ast = DioscriptAst::from_string("fn bad(a) { return a; } return bad();")
+        .expect("Parse should succeed");
+    let mut executor = Executor::init();
+    let result = executor.execute(ast);
+    assert!(result.is_err());
+    assert_eq!(executor.debug_scopes_info().len(), 1);
+}
+
+#[test]
+fn test_loop_error_cleans_up_scope() {
+    let ast = DioscriptAst::from_string("let arr = [1]; for i in arr { return missing; }")
+        .expect("Parse should succeed");
+    let mut executor = Executor::init();
+    let result = executor.execute(ast);
+    assert!(result.is_err());
+    assert_eq!(executor.debug_scopes_info().len(), 1);
+}
+
 // ===========================================================================
 // 5. Variables
 // ===========================================================================
@@ -177,6 +207,15 @@ fn test_while_loop_sum() {
     );
 }
 
+#[test]
+fn test_while_non_boolean_condition_error() {
+    let result = exec(r#"while "abc" { return 1; } return 2;"#);
+    assert!(
+        matches!(result, Err(RuntimeError::IllegalTypeInConditional { .. })),
+        "while conditions must be boolean"
+    );
+}
+
 // ===========================================================================
 // 8. Functions
 // ===========================================================================
@@ -207,6 +246,15 @@ fn test_for_in_loop() {
     assert_eq!(
         exec_ok("let arr = [1, 2, 3]; let sum = 0; for i in arr { sum = sum + i; } return sum;"),
         Value::Number(6.0)
+    );
+}
+
+#[test]
+fn test_for_in_non_list_error() {
+    let result = exec(r#"for i in "abc" { return i; } return 9;"#);
+    assert!(
+        matches!(result, Err(RuntimeError::IllegalTypeInIteration { .. })),
+        "for-in over non-list values must return an error"
     );
 }
 

@@ -263,32 +263,43 @@ impl Runtime {
         self.scopes.pop();
     }
 
+    fn with_scope<T>(
+        &mut self,
+        isolate: bool,
+        f: impl FnOnce(&mut Self) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        self.enter_scope(isolate);
+        let result = f(self);
+        self.leave_scope();
+        result
+    }
+
+    fn require_boolean_condition(value: Value) -> Result<bool, RuntimeError> {
+        if let Value::Boolean(state) = value {
+            Ok(state)
+        } else {
+            Err(RuntimeError::IllegalTypeInConditional {
+                value_type: value.value_name(),
+            })
+        }
+    }
+
     pub fn execute_scope(
         &mut self,
         statements: Vec<DioAstStatement>,
     ) -> Result<Value, RuntimeError> {
-        // enter a new scope
-        self.enter_scope(false);
-
-        let result = self.execute_scope_without_new_scope(statements)?;
-
-        self.leave_scope();
-
-        Ok(result)
+        self.with_scope(false, |runtime| {
+            runtime.execute_scope_without_new_scope(statements)
+        })
     }
 
     pub fn execute_isolate_scope(
         &mut self,
         statements: Vec<DioAstStatement>,
     ) -> Result<Value, RuntimeError> {
-        // enter a new scope
-        self.enter_scope(true);
-
-        let result = self.execute_scope_without_new_scope(statements)?;
-
-        self.leave_scope();
-
-        Ok(result)
+        self.with_scope(true, |runtime| {
+            runtime.execute_scope_without_new_scope(statements)
+        })
     }
 
     pub fn execute_scope_without_new_scope(
@@ -357,7 +368,7 @@ impl Runtime {
                         LoopExecuteType::Conditional(cond) => loop {
                             let cond = cond.clone();
                             let state = self.execute_calculate(cond)?;
-                            let state = state.to_boolean_data();
+                            let state = Self::require_boolean_condition(state)?;
                             if !state {
                                 break;
                             } else {
@@ -371,18 +382,25 @@ impl Runtime {
                         },
                         LoopExecuteType::Iter { iter, var } => {
                             let iter = self.execute_calculate(iter)?;
-                            if iter.value_name() == "list" {
-                                for i in iter.as_list().unwrap() {
-                                    self.enter_scope(false);
-                                    self.create_var(&var, i.clone())?;
-                                    let res =
-                                        self.execute_scope_without_new_scope(data.inner.clone())?;
-                                    self.leave_scope();
-                                    if !res.as_none() {
-                                        result = res;
-                                        finish = true;
-                                        break;
+                            match iter {
+                                Value::List(items) => {
+                                    for item in items {
+                                        let res = self.with_scope(false, |runtime| {
+                                            runtime.create_var(&var, item)?;
+                                            runtime
+                                                .execute_scope_without_new_scope(data.inner.clone())
+                                        })?;
+                                        if !res.as_none() {
+                                            result = res;
+                                            finish = true;
+                                            break;
+                                        }
                                     }
+                                }
+                                other => {
+                                    return Err(RuntimeError::IllegalTypeInIteration {
+                                        value_type: other.value_name(),
+                                    });
                                 }
                             }
                         }
@@ -530,44 +548,42 @@ impl Runtime {
             types::FunctionType::DScript((f, env)) => {
                 let f = f.clone();
 
-                // Enter a new function scope
-                self.enter_scope(true);
+                self.with_scope(true, |runtime| {
+                    for (k, id) in &env {
+                        runtime
+                            .scopes
+                            .last_mut()
+                            .unwrap()
+                            .data
+                            .insert(k.clone(), *id);
+                    }
 
-                for (k, id) in &env {
-                    self.scopes.last_mut().unwrap().data.insert(k.clone(), *id);
-                }
+                    // Set the function parameters in the new scope
+                    let fixed_len = f.params.len();
+                    let provided_len = par.len();
+                    let has_variadic = f.variadic_param.is_some();
 
-                // Set the function parameters in the new scope
-                let fixed_len = f.params.len();
-                let provided_len = par.len();
-                let has_variadic = f.variadic_param.is_some();
+                    if (!has_variadic && provided_len != fixed_len)
+                        || (has_variadic && provided_len < fixed_len)
+                    {
+                        return Err(RuntimeError::IllegalArgumentsNumber {
+                            need: fixed_len as i16,
+                            provided: provided_len as i16,
+                        });
+                    }
 
-                if (!has_variadic && provided_len != fixed_len)
-                    || (has_variadic && provided_len < fixed_len)
-                {
-                    self.leave_scope();
-                    return Err(RuntimeError::IllegalArgumentsNumber {
-                        need: fixed_len as i16,
-                        provided: provided_len as i16,
-                    });
-                }
+                    for (idx, name) in f.params.iter().enumerate() {
+                        runtime.create_var(name, par[idx].clone())?;
+                    }
 
-                for (idx, name) in f.params.iter().enumerate() {
-                    self.create_var(name, par[idx].clone())?;
-                }
+                    if let Some(var_name) = &f.variadic_param {
+                        let rest_slice = par[fixed_len..].to_vec();
+                        runtime.create_var(var_name, Value::List(rest_slice))?;
+                    }
 
-                if let Some(var_name) = &f.variadic_param {
-                    let rest_slice = par[fixed_len..].to_vec();
-                    self.create_var(var_name, Value::List(rest_slice))?;
-                }
-
-                // Execute the function body
-                let result = self.execute_scope(f.inner)?;
-
-                // Leave the function scope
-                self.leave_scope();
-
-                Ok(result)
+                    // Execute the function body
+                    runtime.execute_scope(f.inner)
+                })
             }
             types::FunctionType::Rusty((f, need_param_num)) => {
                 if need_param_num != -1 && (par.len() as i32) != need_param_num {
@@ -733,13 +749,45 @@ impl Runtime {
             }
             CalcExpr::And(l, r) => {
                 let l = self.execute_calculate(*l)?;
-                let r = self.execute_calculate(*r)?;
-                l.calc(&r, CalculateMark::And)
+                match l {
+                    Value::Boolean(false) => Ok(Value::Boolean(false)),
+                    Value::Boolean(true) => {
+                        let r = self.execute_calculate(*r)?;
+                        if let Value::Boolean(r) = r {
+                            Ok(Value::Boolean(r))
+                        } else {
+                            Err(RuntimeError::IllegalOperatorForType {
+                                operator: "&&".to_string(),
+                                value_type: r.value_name(),
+                            })
+                        }
+                    }
+                    other => Err(RuntimeError::IllegalOperatorForType {
+                        operator: "&&".to_string(),
+                        value_type: other.value_name(),
+                    }),
+                }
             }
             CalcExpr::Or(l, r) => {
                 let l = self.execute_calculate(*l)?;
-                let r = self.execute_calculate(*r)?;
-                l.calc(&r, CalculateMark::Or)
+                match l {
+                    Value::Boolean(true) => Ok(Value::Boolean(true)),
+                    Value::Boolean(false) => {
+                        let r = self.execute_calculate(*r)?;
+                        if let Value::Boolean(r) = r {
+                            Ok(Value::Boolean(r))
+                        } else {
+                            Err(RuntimeError::IllegalOperatorForType {
+                                operator: "||".to_string(),
+                                value_type: r.value_name(),
+                            })
+                        }
+                    }
+                    other => Err(RuntimeError::IllegalOperatorForType {
+                        operator: "||".to_string(),
+                        value_type: other.value_name(),
+                    }),
+                }
             }
         }
     }
@@ -1070,7 +1118,7 @@ impl Runtime {
                         LoopExecuteType::Conditional(cond) => loop {
                             let cond = cond.clone();
                             let state = self.execute_calculate(cond)?;
-                            let state = state.to_boolean_data();
+                            let state = Self::require_boolean_condition(state)?;
                             if !state {
                                 break;
                             } else {
@@ -1093,27 +1141,34 @@ impl Runtime {
                         },
                         LoopExecuteType::Iter { iter, var } => {
                             let iter = self.execute_calculate(iter)?;
-                            if iter.value_name() == "list" {
-                                for i in iter.as_list().unwrap() {
-                                    self.enter_scope(false);
-                                    self.create_var(&var, i.clone())?;
-                                    let temp =
-                                        self.execute_scope_without_new_scope(v.inner.clone())?;
-                                    self.leave_scope();
-                                    if let Value::Tuple((k, v)) = &temp {
-                                        if let Value::String(k) = *k.clone() {
-                                            attrs.insert(k.to_string(), *v.clone());
+                            match iter {
+                                Value::List(items) => {
+                                    for item in items {
+                                        let temp = self.with_scope(false, |runtime| {
+                                            runtime.create_var(&var, item)?;
+                                            runtime.execute_scope_without_new_scope(v.inner.clone())
+                                        })?;
+                                        if let Value::Tuple((k, v)) = &temp {
+                                            if let Value::String(k) = *k.clone() {
+                                                attrs.insert(k.to_string(), *v.clone());
+                                            }
+                                        }
+                                        if let Value::String(v) = &temp {
+                                            content.push(ElementContentType::Content(v.clone()));
+                                        }
+                                        if let Value::Number(v) = &temp {
+                                            content
+                                                .push(ElementContentType::Content(format!("{v}")));
+                                        }
+                                        if let Value::Element(v) = temp {
+                                            content.push(ElementContentType::Children(v));
                                         }
                                     }
-                                    if let Value::String(v) = &temp {
-                                        content.push(ElementContentType::Content(v.clone()));
-                                    }
-                                    if let Value::Number(v) = &temp {
-                                        content.push(ElementContentType::Content(format!("{v}")));
-                                    }
-                                    if let Value::Element(v) = temp {
-                                        content.push(ElementContentType::Children(v));
-                                    }
+                                }
+                                other => {
+                                    return Err(RuntimeError::IllegalTypeInIteration {
+                                        value_type: other.value_name(),
+                                    });
                                 }
                             }
                         }

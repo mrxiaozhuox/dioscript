@@ -32,6 +32,9 @@ pub enum RuntimeError {
     #[error("cannot use `{value_type}` in conditional statement.")]
     IllegalTypeInConditional { value_type: String },
 
+    #[error("cannot iterate over `{value_type}` data.")]
+    IllegalTypeInIteration { value_type: String },
+
     #[error("cannot get `{index_type}` type index from `{value_type}` data.")]
     IllegalIndexType {
         index_type: String,
