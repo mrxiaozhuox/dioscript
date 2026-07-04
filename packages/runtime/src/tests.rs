@@ -306,7 +306,10 @@ fn test_negative_index_error() {
 #[test]
 fn test_out_of_bounds_index_error() {
     let result = exec("let arr = [1, 2, 3]; return arr[5];");
-    assert!(result.is_err(), "Out-of-bounds index should return an error");
+    assert!(
+        result.is_err(),
+        "Out-of-bounds index should return an error"
+    );
 }
 
 #[test]

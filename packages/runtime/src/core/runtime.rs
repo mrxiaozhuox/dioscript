@@ -375,7 +375,8 @@ impl Runtime {
                                 for i in iter.as_list().unwrap() {
                                     self.enter_scope(false);
                                     self.create_var(&var, i.clone())?;
-                                    let res = self.execute_scope_without_new_scope(data.inner.clone())?;
+                                    let res =
+                                        self.execute_scope_without_new_scope(data.inner.clone())?;
                                     self.leave_scope();
                                     if !res.as_none() {
                                         result = res;
@@ -1096,7 +1097,8 @@ impl Runtime {
                                 for i in iter.as_list().unwrap() {
                                     self.enter_scope(false);
                                     self.create_var(&var, i.clone())?;
-                                    let temp = self.execute_scope_without_new_scope(v.inner.clone())?;
+                                    let temp =
+                                        self.execute_scope_without_new_scope(v.inner.clone())?;
                                     self.leave_scope();
                                     if let Value::Tuple((k, v)) = &temp {
                                         if let Value::String(k) = *k.clone() {

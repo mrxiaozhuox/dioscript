@@ -33,7 +33,7 @@ impl<'rt> RustyExecutor<'rt> {
     /// set a variable (in dioscript runtime)
     /// INFO: this variable will only work on current scope (function calling scope)
     ///
-    /// ```rust
+    /// ```ignore
     /// fn rusty_function_ex(rt: RustyExecutor, args: Vec<Value>) -> Result<Value, RuntimeError> {
     ///     rt.set_var("count", Value::Number(0));
     /// }
@@ -54,7 +54,7 @@ impl<'rt> RustyExecutor<'rt> {
 
     /// get a variable from dioscript runtime
     ///
-    /// ```rust
+    /// ```ignore
     /// fn rusty_function_ex(rt: RustyExecutor, args: Vec<Value>) -> Result<Value, RuntimeError> {
     ///     rt.get_var("count");
     /// }

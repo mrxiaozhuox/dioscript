@@ -18,12 +18,10 @@ pub fn type_name(_: RustyExecutor, args: Vec<Value>) -> Result<Value, RuntimeErr
 }
 
 pub fn execute(mut rt: RustyExecutor, args: Vec<Value>) -> Result<Value, RuntimeError> {
-    let value = args
-        .first()
-        .ok_or(RuntimeError::IllegalArgumentsNumber {
-            need: 1,
-            provided: 0,
-        })?;
+    let value = args.first().ok_or(RuntimeError::IllegalArgumentsNumber {
+        need: 1,
+        provided: 0,
+    })?;
     if let Value::String(v) = value {
         return rt.execute(v, false);
     }

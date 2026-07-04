@@ -10,9 +10,7 @@ pub mod ast;
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{
-        DioAstStatement, DioscriptAst, FunctionName, LoopExecuteType,
-    };
+    use crate::ast::{DioAstStatement, DioscriptAst, FunctionName, LoopExecuteType};
     use crate::element::AstElementContentType;
     use crate::parser::CalcExpr;
     use crate::types::AstValue;
@@ -274,18 +272,16 @@ mod tests {
         let ast = parse("for i in (arr) { }");
         assert_eq!(ast.stats.len(), 1);
         match &ast.stats[0] {
-            DioAstStatement::LoopStatement(ls) => {
-                match &ls.execute_type {
-                    LoopExecuteType::Iter { iter, var } => {
-                        assert_eq!(var, "i");
-                        assert_eq!(
-                            *iter,
-                            CalcExpr::Value(AstValue::Variable("arr".to_string()))
-                        );
-                    }
-                    other => panic!("Expected Iter loop, got {:?}", other),
+            DioAstStatement::LoopStatement(ls) => match &ls.execute_type {
+                LoopExecuteType::Iter { iter, var } => {
+                    assert_eq!(var, "i");
+                    assert_eq!(
+                        *iter,
+                        CalcExpr::Value(AstValue::Variable("arr".to_string()))
+                    );
                 }
-            }
+                other => panic!("Expected Iter loop, got {:?}", other),
+            },
             other => panic!("Expected LoopStatement, got {:?}", other),
         }
     }
@@ -356,10 +352,7 @@ mod tests {
                 match &v.expr {
                     CalcExpr::Value(AstValue::Dict(map)) => {
                         assert_eq!(map.len(), 2);
-                        assert_eq!(
-                            map.get("a"),
-                            Some(&CalcExpr::Value(AstValue::Number(1.0)))
-                        );
+                        assert_eq!(map.get("a"), Some(&CalcExpr::Value(AstValue::Number(1.0))));
                         assert_eq!(
                             map.get("b"),
                             Some(&CalcExpr::Value(AstValue::String("two".to_string())))
@@ -387,7 +380,10 @@ mod tests {
                     assert_eq!(el.content.len(), 1);
                     match &el.content[0] {
                         AstElementContentType::InlineExpr(expr) => {
-                            assert_eq!(*expr, CalcExpr::Value(AstValue::String("hello".to_string())));
+                            assert_eq!(
+                                *expr,
+                                CalcExpr::Value(AstValue::String("hello".to_string()))
+                            );
                         }
                         other => panic!("Expected InlineExpr, got {:?}", other),
                     }
@@ -419,7 +415,10 @@ mod tests {
                             assert_eq!(child.content.len(), 1);
                             match &child.content[0] {
                                 AstElementContentType::InlineExpr(expr) => {
-                                    assert_eq!(*expr, CalcExpr::Value(AstValue::String("child".to_string())));
+                                    assert_eq!(
+                                        *expr,
+                                        CalcExpr::Value(AstValue::String("child".to_string()))
+                                    );
                                 }
                                 other => panic!("Expected InlineExpr, got {:?}", other),
                             }
@@ -519,10 +518,7 @@ mod tests {
             DioAstStatement::FunctionCall(call) => {
                 assert_eq!(call.name, FunctionName::Single("print".to_string()));
                 assert_eq!(call.arguments.len(), 1);
-                assert_eq!(
-                    call.arguments[0],
-                    CalcExpr::Value(AstValue::Number(42.0))
-                );
+                assert_eq!(call.arguments[0], CalcExpr::Value(AstValue::Number(42.0)));
             }
             other => panic!("Expected FunctionCall, got {:?}", other),
         }
