@@ -4,7 +4,7 @@ use nom::{
     branch::alt,
     bytes::complete::{escaped_transform, tag, tag_no_case, take_till1, take_while, take_while1},
     character::complete::{
-        alpha1, alphanumeric1, char, digit1, multispace0, not_line_ending, space0, space1,
+        alphanumeric1, char, digit1, multispace0, multispace1, not_line_ending, space0, space1,
     },
     combinator::{cut, map, map_res, opt, value},
     error::{context, VerboseError},
@@ -218,8 +218,8 @@ impl VariableParser {
             "var name",
             map(
                 pair(
-                    alpha1,
-                    take_while(|c: char| c.is_alphanumeric() || c == '_'),
+                    alt((take_while1(|c: char| c.is_ascii_alphabetic()), tag("_"))),
+                    take_while(|c: char| c.is_ascii_alphanumeric() || c == '_'),
                 ),
                 |(first, rest): (&str, &str)| format!("{}{}", first, rest).trim().to_string(),
             ),
@@ -381,6 +381,16 @@ impl CalculateParser {
 
 struct FunctionParser;
 impl FunctionParser {
+    fn parse_arguments(message: &str) -> ParserResult<'_, Vec<CalcExpr>> {
+        alt((
+            terminated(
+                separated_list1(tag(","), delimited(space0, CalculateParser::expr, space0)),
+                opt(tag(",")),
+            ),
+            value(Vec::new(), tag("")),
+        ))(message)
+    }
+
     fn call(message: &str) -> ParserResult<'_, FunctionCall> {
         context(
             "function call",
@@ -399,11 +409,7 @@ impl FunctionParser {
                         ),
                         tag("("),
                     ),
-                    cut(delimited(
-                        space0,
-                        separated_list0(tag(","), delimited(space0, CalculateParser::expr, space0)),
-                        space0,
-                    )),
+                    cut(delimited(space0, Self::parse_arguments, space0)),
                     tag(")"),
                 )),
                 |(name, arguments, _)| FunctionCall { name, arguments },
@@ -420,11 +426,7 @@ impl FunctionParser {
                         map(VariableParser::parse_var_name, FunctionName::Single),
                         tag("("),
                     ),
-                    cut(delimited(
-                        space0,
-                        separated_list0(tag(","), delimited(space0, CalculateParser::expr, space0)),
-                        space0,
-                    )),
+                    cut(delimited(space0, Self::parse_arguments, space0)),
                     tag(")"),
                 )),
                 |(name, arguments, _)| FunctionCall { name, arguments },
@@ -434,13 +436,26 @@ impl FunctionParser {
 
     fn parse_param_list(i: &str) -> ParserResult<'_, (Vec<String>, Option<String>)> {
         let ident = |input| delimited(space0, VariableParser::parse_var_name, space0)(input);
+        let (i, _) = space0(i)?;
 
-        let (i, fixed) = separated_list0(delimited(space0, char(','), space0), ident)(i)?;
+        if i.starts_with(')') {
+            return Ok((i, (Vec::new(), None)));
+        }
+
+        if i.starts_with('*') {
+            let (i, variadic) = preceded(char('*'), cut(ident))(i)?;
+            let (i, _) = opt(delimited(space0, char(','), space0))(i)?;
+            return Ok((i, (Vec::new(), Some(variadic))));
+        }
+
+        let (i, fixed) = separated_list1(delimited(space0, char(','), space0), ident)(i)?;
 
         let (i, variadic) = opt(preceded(
-            delimited(space0, opt(char(',')), space0),
+            delimited(space0, char(','), space0),
             preceded(char('*'), cut(ident)),
         ))(i)?;
+
+        let (i, _) = opt(delimited(space0, char(','), space0))(i)?;
 
         Ok((i, (fixed, variadic)))
     }
@@ -557,12 +572,8 @@ impl StatementParser {
 
 struct ModuleParser;
 impl ModuleParser {
-    fn module_name_style(c: char) -> bool {
-        matches!(c, 'a'..='z' | '_')
-    }
-
-    fn parse_module_name(message: &str) -> ParserResult<'_, &str> {
-        context("module name", take_while1(Self::module_name_style))(message)
+    fn parse_module_name(message: &str) -> ParserResult<'_, String> {
+        context("module name", VariableParser::parse_var_name)(message)
     }
 
     fn parse_use(message: &str) -> ParserResult<'_, UseStatement> {
@@ -574,7 +585,7 @@ impl ModuleParser {
                     separated_list1(tag("::"), Self::parse_module_name),
                     pair(space0, cut(tag(";"))),
                 ),
-                |list| UseStatement(list.iter().map(|v| v.to_string()).collect()),
+                UseStatement,
             ),
         )(message)
     }
@@ -797,7 +808,11 @@ pub(crate) fn parse_rsx(message: &str) -> ParserResult<'_, Vec<DioAstStatement>>
                 map(comment, DioAstStatement::LineComment),
                 map(VariableParser::parse, DioAstStatement::VariableAss),
                 map(
-                    delimited(tag("return "), cut(CalculateParser::expr), tag(";")),
+                    delimited(
+                        pair(tag("return"), multispace1),
+                        cut(CalculateParser::expr),
+                        tag(";"),
+                    ),
                     DioAstStatement::ReturnValue,
                 ),
                 map(

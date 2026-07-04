@@ -103,6 +103,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_identifier_can_start_with_underscore() {
+        let ast = parse("let _x = 1;\n_x;");
+        assert_eq!(ast.stats.len(), 2);
+        match &ast.stats[0] {
+            DioAstStatement::VariableAss(v) => {
+                assert_eq!(v.name, "_x");
+                assert_eq!(v.expr, CalcExpr::Value(AstValue::Number(1.0)));
+            }
+            other => panic!("Expected VariableAss, got {:?}", other),
+        }
+        match &ast.stats[1] {
+            DioAstStatement::CalcExpr(expr) => {
+                assert_eq!(*expr, CalcExpr::Value(AstValue::Variable("_x".to_string())));
+            }
+            other => panic!("Expected CalcExpr, got {:?}", other),
+        }
+    }
+
     // ===========================================================================
     // 2. Arithmetic expressions
     // ===========================================================================
@@ -336,6 +355,17 @@ mod tests {
     }
 
     #[test]
+    fn test_function_define_accepts_trailing_comma_params() {
+        let ast = parse("fn add(a, b,) { return a + b; }");
+        match &ast.stats[0] {
+            DioAstStatement::FunctionDefine(func) => {
+                assert_eq!(func.params, vec!["a".to_string(), "b".to_string()]);
+            }
+            other => panic!("Expected FunctionDefine, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_function_duplicate_params_rejected() {
         let result = DioscriptAst::from_string("fn bad(a, a) { return a; }");
         assert!(
@@ -351,6 +381,12 @@ mod tests {
             result.is_err(),
             "variadic parameter must not duplicate fixed params"
         );
+    }
+
+    #[test]
+    fn test_function_params_reject_lone_comma() {
+        let result = DioscriptAst::from_string("fn bad(,) { return 1; }");
+        assert!(result.is_err(), "lone comma is not a parameter list");
     }
 
     // ===========================================================================
@@ -527,6 +563,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_module_use_uses_identifier_rules() {
+        let ast = parse("use _std::io2::hash_map;");
+        match &ast.stats[0] {
+            DioAstStatement::ModuleUse(use_stmt) => {
+                assert_eq!(
+                    use_stmt.0,
+                    vec![
+                        "_std".to_string(),
+                        "io2".to_string(),
+                        "hash_map".to_string()
+                    ]
+                );
+            }
+            other => panic!("Expected ModuleUse, got {:?}", other),
+        }
+    }
+
     // ===========================================================================
     // 10. Multiple statements / integration
     // ===========================================================================
@@ -570,8 +624,62 @@ mod tests {
     }
 
     #[test]
+    fn test_function_call_accepts_trailing_comma() {
+        let ast = parse("print(42,);");
+        match &ast.stats[0] {
+            DioAstStatement::FunctionCall(call) => {
+                assert_eq!(call.name, FunctionName::Single("print".to_string()));
+                assert_eq!(
+                    call.arguments,
+                    vec![CalcExpr::Value(AstValue::Number(42.0))]
+                );
+            }
+            other => panic!("Expected FunctionCall, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_function_call_rejects_lone_comma() {
+        let result = DioscriptAst::from_string("print(,);");
+        assert!(result.is_err(), "lone comma is not an argument list");
+    }
+
+    #[test]
+    fn test_namespaced_function_call_uses_identifier_rules() {
+        let ast = parse("_std::io2::print(_x,);");
+        match &ast.stats[0] {
+            DioAstStatement::FunctionCall(call) => {
+                assert_eq!(
+                    call.name,
+                    FunctionName::Namespace(vec![
+                        "_std".to_string(),
+                        "io2".to_string(),
+                        "print".to_string()
+                    ])
+                );
+                assert_eq!(
+                    call.arguments,
+                    vec![CalcExpr::Value(AstValue::Variable("_x".to_string()))]
+                );
+            }
+            other => panic!("Expected FunctionCall, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_return_statement() {
         let ast = parse("return 42;");
+        match &ast.stats[0] {
+            DioAstStatement::ReturnValue(expr) => {
+                assert_eq!(*expr, CalcExpr::Value(AstValue::Number(42.0)));
+            }
+            other => panic!("Expected ReturnValue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_return_statement_accepts_multispace() {
+        let ast = parse("return\n  42;");
         match &ast.stats[0] {
             DioAstStatement::ReturnValue(expr) => {
                 assert_eq!(*expr, CalcExpr::Value(AstValue::Number(42.0)));
