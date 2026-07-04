@@ -678,14 +678,23 @@ mod tests {
     }
 
     #[test]
-    fn test_return_statement_accepts_multispace() {
-        let ast = parse("return\n  42;");
+    fn test_return_statement_accepts_horizontal_space() {
+        let ast = parse("return   \t42;");
         match &ast.stats[0] {
             DioAstStatement::ReturnValue(expr) => {
                 assert_eq!(*expr, CalcExpr::Value(AstValue::Number(42.0)));
             }
             other => panic!("Expected ReturnValue, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_return_statement_rejects_newline_after_keyword() {
+        let result = DioscriptAst::from_string("return\n  42;");
+        assert!(
+            result.is_err(),
+            "return expression must stay on the same line"
+        );
     }
 
     #[test]

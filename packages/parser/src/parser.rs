@@ -4,7 +4,7 @@ use nom::{
     branch::alt,
     bytes::complete::{escaped_transform, tag, tag_no_case, take_till1, take_while, take_while1},
     character::complete::{
-        alphanumeric1, char, digit1, multispace0, multispace1, not_line_ending, space0, space1,
+        alphanumeric1, char, digit1, multispace0, not_line_ending, space0, space1,
     },
     combinator::{cut, map, map_res, opt, value},
     error::{context, VerboseError},
@@ -809,7 +809,7 @@ pub(crate) fn parse_rsx(message: &str) -> ParserResult<'_, Vec<DioAstStatement>>
                 map(VariableParser::parse, DioAstStatement::VariableAss),
                 map(
                     delimited(
-                        pair(tag("return"), multispace1),
+                        pair(tag("return"), space1),
                         cut(CalculateParser::expr),
                         tag(";"),
                     ),
