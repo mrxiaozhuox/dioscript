@@ -2,13 +2,11 @@ use std::collections::HashMap;
 
 use nom::{
     branch::alt,
-    bytes::complete::{
-        escaped_transform, tag, tag_no_case, take, take_till1, take_while, take_while1,
-    },
+    bytes::complete::{escaped_transform, tag, tag_no_case, take_till1, take_while, take_while1},
     character::complete::{
         alpha1, alphanumeric1, char, digit1, multispace0, not_line_ending, space0, space1,
     },
-    combinator::{cut, map, opt, value},
+    combinator::{cut, map, map_res, opt, value},
     error::{context, VerboseError},
     multi::{fold_many0, many0, separated_list0, separated_list1},
     number::complete::double,
@@ -85,11 +83,17 @@ impl TypeParser {
                 value("\n", tag("n")),
                 value("\r", tag("r")),
                 value("\t", tag("t")),
-                map(take(1u8), |c: &str| c),
             )),
         );
 
-        context("string", delimited(char('"'), string_content, char('"')))(i)
+        context(
+            "string",
+            delimited(
+                char('"'),
+                alt((string_content, value(String::new(), tag("")))),
+                char('"'),
+            ),
+        )(i)
     }
 
     // boolean
@@ -444,7 +448,7 @@ impl FunctionParser {
     fn define(message: &str) -> ParserResult<'_, FunctionDefine> {
         context(
             "function define",
-            map(
+            map_res(
                 tuple((
                     pair(tag("fn"), cut(space1)),
                     opt(terminated(VariableParser::parse_var_name, space0)),
@@ -455,11 +459,24 @@ impl FunctionParser {
                     ),
                     delimited(multispace0, parse_rsx, pair(multispace0, cut(tag("}")))),
                 )),
-                |(_, name, (params, variadic_param), inner)| FunctionDefine {
-                    name,
-                    params,
-                    variadic_param,
-                    inner,
+                |(_, name, (params, variadic_param), inner)| {
+                    let mut seen = std::collections::HashSet::new();
+                    for param in &params {
+                        if !seen.insert(param.as_str()) {
+                            return Err("duplicate function parameter");
+                        }
+                    }
+                    if let Some(variadic) = &variadic_param {
+                        if !seen.insert(variadic.as_str()) {
+                            return Err("duplicate function parameter");
+                        }
+                    }
+                    Ok(FunctionDefine {
+                        name,
+                        params,
+                        variadic_param,
+                        inner,
+                    })
                 },
             ),
         )(message)
@@ -580,7 +597,7 @@ impl ElementParser {
     fn parse(message: &str) -> ParserResult<'_, AstElement> {
         context(
             "element",
-            map(
+            map_res(
                 pair(
                     terminated(ElementParser::parse_element_name, multispace0),
                     delimited(
@@ -729,7 +746,9 @@ impl ElementParser {
                     for a in attrs {
                         match a {
                             AttributeType::Attribute((key, value)) => {
-                                attr.insert(key, value);
+                                if attr.insert(key, value).is_some() {
+                                    return Err("duplicate element attribute");
+                                }
                             }
                             AttributeType::Content(c) => {
                                 content.push(AstElementContentType::Content(c));
@@ -748,11 +767,11 @@ impl ElementParser {
                             }
                         }
                     }
-                    AstElement {
+                    Ok(AstElement {
                         name: name.to_string(),
                         attributes: attr,
                         content,
-                    }
+                    })
                 },
             ),
         )(message)

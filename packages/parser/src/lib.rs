@@ -58,6 +58,24 @@ mod tests {
     }
 
     #[test]
+    fn test_variable_define_empty_string() {
+        let ast = parse(r#"let s = "";"#);
+        match &ast.stats[0] {
+            DioAstStatement::VariableAss(v) => {
+                assert_eq!(v.name, "s");
+                assert_eq!(v.expr, CalcExpr::Value(AstValue::String(String::new())));
+            }
+            other => panic!("Expected VariableAss, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_string_invalid_escape_rejected() {
+        let result = DioscriptAst::from_string(r#"let s = "\q";"#);
+        assert!(result.is_err(), "unknown escape sequences must be rejected");
+    }
+
+    #[test]
     fn test_variable_define_bool() {
         let ast = parse("let b = true;");
         assert_eq!(ast.stats.len(), 1);
@@ -317,6 +335,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_function_duplicate_params_rejected() {
+        let result = DioscriptAst::from_string("fn bad(a, a) { return a; }");
+        assert!(
+            result.is_err(),
+            "duplicate function parameters must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_function_duplicate_variadic_param_rejected() {
+        let result = DioscriptAst::from_string("fn bad(a, *a) { return a; }");
+        assert!(
+            result.is_err(),
+            "variadic parameter must not duplicate fixed params"
+        );
+    }
+
     // ===========================================================================
     // 6. List and Dict literals
     // ===========================================================================
@@ -430,6 +466,15 @@ mod tests {
             },
             other => panic!("Expected CalcExpr, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_element_duplicate_attrs_rejected() {
+        let result = DioscriptAst::from_string(r#"div { class: "a", class: "b" };"#);
+        assert!(
+            result.is_err(),
+            "duplicate element attributes must be rejected"
+        );
     }
 
     // ===========================================================================
